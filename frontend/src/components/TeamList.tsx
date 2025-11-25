@@ -13,11 +13,11 @@ const TeamList: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // 過濾選項
-  const [hideCancelled, setHideCancelled] = useState<boolean>(true);
-  const [hideNoNumber, setHideNoNumber] = useState<boolean>(false);
+  const [hideCancelled] = useState<boolean>(true);
+  const [hideNoNumber] = useState<boolean>(false);
   
   // 排序選項
-  const [sortBy, setSortBy] = useState<'registrationNumber' | 'originalIndex'>('registrationNumber');
+  const [sortBy] = useState<'registrationNumber' | 'originalIndex'>('registrationNumber');
   
   // 檔名輸入
   const [customFilename, setCustomFilename] = useState<string>('');
