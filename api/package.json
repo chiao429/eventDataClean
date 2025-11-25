@@ -1,0 +1,9 @@
+{
+  "name": "event-checkin-api",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "multiparty": "^4.2.3",
+    "xlsx": "^0.18.5"
+  }
+}

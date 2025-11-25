@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import uploadRoutes from './routes/uploadRoutes.js';
+import teamRoutes from './routes/teamRoutes.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -24,6 +25,7 @@ if (!fs.existsSync(uploadsDir)) {
 
 // API 路由
 app.use('/api', uploadRoutes);
+app.use('/api/team', teamRoutes);
 
 // 健康檢查端點
 app.get('/health', (req, res) => {

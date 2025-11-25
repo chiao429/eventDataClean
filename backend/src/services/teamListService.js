@@ -39,8 +39,10 @@ function applySheetStyles(ws, data) {
     // 1. 先取得標題列（第0列）的寬度作為基準
     const headerCell = ws[XLSX.utils.encode_cell({ r: 0, c: C })];
     let headerWidth = 8; // 預設最小寬度
+    let headerText = '';
     if (headerCell && headerCell.v) {
-      headerWidth = calculateWidth(String(headerCell.v));
+      headerText = String(headerCell.v);
+      headerWidth = calculateWidth(headerText);
     }
     
     // 2. 檢查內容列是否有超過標題寬度的
@@ -55,9 +57,14 @@ function applySheetStyles(ws, data) {
       }
     }
     
-    // 3. 如果內容寬度超過標題，使用內容寬度；否則使用標題寬度
-    const finalWidth = maxContentWidth > headerWidth ? maxContentWidth : headerWidth;
-    colWidths.push({ wch: Math.ceil(finalWidth) + 1 }); // 向上取整並加1作為邊距
+    // 3. 特殊處理「出席」欄位，固定為兩個中文字寬度
+    if (headerText === '出席') {
+      colWidths.push({ wch: 5 }); // 兩個中文字的寬度
+    } else {
+      // 如果內容寬度超過標題，使用內容寬度；否則使用標題寬度
+      const finalWidth = maxContentWidth > headerWidth ? maxContentWidth : headerWidth;
+      colWidths.push({ wch: Math.ceil(finalWidth) + 1 }); // 向上取整並加1作為邊距
+    }
   }
   ws['!cols'] = colWidths;
 
@@ -78,6 +85,14 @@ function applySheetStyles(ws, data) {
       if (!ws[cellAddress].s) {
         ws[cellAddress].s = {};
       }
+      
+      // 設定外框
+      ws[cellAddress].s.border = {
+        top: { style: 'thin', color: { rgb: '000000' } },
+        bottom: { style: 'thin', color: { rgb: '000000' } },
+        left: { style: 'thin', color: { rgb: '000000' } },
+        right: { style: 'thin', color: { rgb: '000000' } }
+      };
 
       // 第一列（標題列）：全部置中並加上背景顏色
       if (R === 0) {
@@ -258,12 +273,13 @@ function parseSiblingString(siblingStr) {
  * 處理 Excel 檔案的主函數
  * @param {string} inputPath - 輸入檔案路徑
  * @param {Object} filterOptions - 過濾選項
- * @param {boolean} filterOptions.hideCancelled - 不顯示取消
- * @param {boolean} filterOptions.hideNoNumber - 不顯示無序號
+ * @param {boolean} filterOptions.hideCancelled - 是否隱藏取消名單
+ * @param {boolean} filterOptions.hideNoNumber - 是否隱藏無序號名單
  * @param {string} filterOptions.sortBy - 排序方式 ('registrationNumber' | 'originalIndex')
+ * @param {Object} teamInfo - 小隊資訊(活動名稱、小隊長資料)
  * @returns {Promise<string>} - 輸出檔案路徑
  */
-export async function processExcelFile(inputPath, filterOptions = {}) {
+export async function processExcelFile(inputPath, filterOptions = {}, teamInfo = null) {
   try {
     // 1. 讀取 Excel 檔案
     const workbook = XLSX.readFile(inputPath);
@@ -365,8 +381,8 @@ export async function processExcelFile(inputPath, filterOptions = {}) {
       console.log(`過濾「無序號名單」後剩餘 ${filteredData.length} 筆資料`);
     }
 
-    // 7. 處理資料：依年級分組並加入手足資訊
-    const { gradeSheets, allStudents } = processExcelData(filteredData);
+    // 7. 處理資料：依小隊分組並加入手足資訊
+    const { teamSheets, allStudents } = processExcelData(filteredData);
 
     // 8. 建立新的工作簿
     const newWorkbook = XLSX.utils.book_new();
@@ -377,48 +393,150 @@ export async function processExcelFile(inputPath, filterOptions = {}) {
     XLSX.utils.book_append_sheet(newWorkbook, summarySheet, '總表');
     console.log(`建立分頁: 總表, 共 ${allStudents.length} 筆資料`);
 
-    // 10. 按指定順序建立各年級分頁
-    const gradeOrder = ['學齡前', '一年級', '二年級', '三年級', '四年級', '五年級', '六年級', '國一', '國二', '國三'];
-    
-    for (const grade of gradeOrder) {
-      if (!gradeSheets[grade]) continue;
+    // 10. 建立各小隊分頁（按小隊名稱自然排序）
+    const teamNames = Object.keys(teamSheets).sort((a, b) => {
+      // 自然排序：先比較字母部分，再比較數字部分
+      const matchA = a.match(/^([a-zA-Z]+)(\d+)$/);
+      const matchB = b.match(/^([a-zA-Z]+)(\d+)$/);
       
-      const sheetInfo = gradeSheets[grade];
-      // 建立工作表名稱（Excel 工作表名稱有長度限制）
-      const sheetName = grade.substring(0, 31); // Excel 限制 31 字元
-      
-      // 將資料轉換為工作表
-      const ws = XLSX.utils.aoa_to_sheet(sheetInfo.data);
-      
-      // 設定合併儲存格
-      if (sheetInfo.merges && sheetInfo.merges.length > 0) {
-        ws['!merges'] = sheetInfo.merges;
+      if (matchA && matchB) {
+        // 先比較字母部分
+        if (matchA[1] !== matchB[1]) {
+          return matchA[1].localeCompare(matchB[1]);
+        }
+        // 再比較數字部分
+        return parseInt(matchA[2]) - parseInt(matchB[2]);
       }
       
-      // 設定樣式和欄寬
-      applySheetStyles(ws, sheetInfo.data);
+      // 如果不符合格式，使用普通字串排序
+      return a.localeCompare(b);
+    });
+    
+    console.log(`找到 ${teamNames.length} 個小隊: ${teamNames.join(', ')}`);
+    
+    for (const teamName of teamNames) {
+      const sheetInfo = teamSheets[teamName];
+      // 建立工作表名稱（Excel 工作表名稱有長度限制）
+      const sheetName = teamName.substring(0, 31); // Excel 限制 31 字元
+      
+      // 準備工作表資料，在最上方新增活動名稱和小隊資訊
+      let finalData = [...sheetInfo.data];
+      let additionalMerges = [];
+      
+      if (teamInfo && teamInfo.activityName) {
+        // 取得小隊長資訊
+        const leaderInfo = teamInfo.leaders && teamInfo.leaders[teamName];
+        
+        // 建立第一列：活動名稱 + 小隊資訊（用換行符號分隔）
+        let combinedText = teamInfo.activityName;
+        
+        // 建立小隊資訊
+        let teamInfoText = `${teamName}小隊`;
+        if (leaderInfo) {
+          if (leaderInfo.leader) {
+            const leaderTitle = leaderInfo.leaderGender === '男' ? '哥哥' : leaderInfo.leaderGender === '女' ? '姊姊' : '';
+            teamInfoText += ` 隊長：${leaderInfo.leader}${leaderTitle}`;
+          }
+          if (leaderInfo.viceLeader) {
+            const viceLeaderTitle = leaderInfo.viceLeaderGender === '男' ? '哥哥' : leaderInfo.viceLeaderGender === '女' ? '姊姊' : '';
+            teamInfoText += ` 副小隊長：${leaderInfo.viceLeader}${viceLeaderTitle}`;
+          }
+        }
+        
+        // 用換行符號合併
+        combinedText += '\n' + teamInfoText;
+        const infoRow = [combinedText];
+        
+        // 在資料最前面插入這一列
+        finalData = [infoRow, ...sheetInfo.data];
+        
+        // 設定合併儲存格（合併整列）
+        const colCount = sheetInfo.data[0].length; // 取得欄位數量
+        additionalMerges = [
+          { s: { r: 0, c: 0 }, e: { r: 0, c: colCount - 1 } }  // 第一列合併
+        ];
+      }
+      
+      // 將資料轉換為工作表
+      const ws = XLSX.utils.aoa_to_sheet(finalData);
+      
+      // 設定合併儲存格
+      const allMerges = [...additionalMerges];
+      if (sheetInfo.merges && sheetInfo.merges.length > 0) {
+        // 原有的合併需要調整列索引（因為新增了一列）
+        const offsetMerges = sheetInfo.merges.map(merge => ({
+          s: { r: merge.s.r + (teamInfo && teamInfo.activityName ? 1 : 0), c: merge.s.c },
+          e: { r: merge.e.r + (teamInfo && teamInfo.activityName ? 1 : 0), c: merge.e.c }
+        }));
+        allMerges.push(...offsetMerges);
+      }
+      
+      if (allMerges.length > 0) {
+        ws['!merges'] = allMerges;
+      }
+      
+      // 先設定樣式和欄寬
+      applySheetStyles(ws, finalData);
+      
+      // 如果有小隊資訊,在 applySheetStyles 之後再設定第一列的樣式（避免被覆蓋）
+      if (teamInfo && teamInfo.activityName) {
+        const colCount = sheetInfo.data[0].length;
+        
+        // 設定第一列的列高（足夠顯示兩行文字）
+        if (!ws['!rows']) ws['!rows'] = [];
+        ws['!rows'][0] = { hpt: 40 }; // 設定第一列高度為40點
+        
+        // 設定第一列所有儲存格的樣式
+        for (let c = 0; c < colCount; c++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: 0, c: c });
+          if (!ws[cellAddress]) {
+            ws[cellAddress] = { t: 's', v: '' };
+          }
+          ws[cellAddress].s = {
+            alignment: {
+              wrapText: true,
+              vertical: 'center',
+              horizontal: 'center'
+            },
+            font: {
+              sz: 16,
+              bold: true
+            },
+            fill: {
+              fgColor: { rgb: 'D0D0D0' }
+            },
+            border: {
+              top: { style: 'thin', color: { rgb: '000000' } },
+              bottom: { style: 'thin', color: { rgb: '000000' } },
+              left: { style: 'thin', color: { rgb: '000000' } },
+              right: { style: 'thin', color: { rgb: '000000' } }
+            }
+          };
+        }
+        
+        // 設定標題列(第二列)的底色
+        for (let c = 0; c < colCount; c++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: 1, c: c });
+          if (ws[cellAddress]) {
+            if (!ws[cellAddress].s) {
+              ws[cellAddress].s = {};
+            }
+            ws[cellAddress].s.fill = {
+              fgColor: { rgb: 'D0D0D0' }
+            };
+          }
+        }
+        
+        // 修正「出席」欄位寬度（在有小隊資訊時，標題列是第二列）
+        if (ws['!cols']) {
+          ws['!cols'][0] = { wch: 5 }; // 第一欄（出席）固定為5字元寬
+        }
+      }
       
       // 加入到工作簿
       XLSX.utils.book_append_sheet(newWorkbook, ws, sheetName);
       
-      console.log(`建立分頁: ${sheetName}, 共 ${sheetInfo.data.length - 1} 筆資料`);
-    }
-    
-    // 建立其他未分類的年級
-    for (const [grade, sheetInfo] of Object.entries(gradeSheets)) {
-      if (gradeOrder.includes(grade)) continue; // 跳過已經建立的
-      
-      const sheetName = grade.substring(0, 31);
-      const ws = XLSX.utils.aoa_to_sheet(sheetInfo.data);
-      
-      if (sheetInfo.merges && sheetInfo.merges.length > 0) {
-        ws['!merges'] = sheetInfo.merges;
-      }
-      
-      applySheetStyles(ws, sheetInfo.data);
-      XLSX.utils.book_append_sheet(newWorkbook, ws, sheetName);
-      
-      console.log(`建立分頁: ${sheetName}, 共 ${sheetInfo.data.length - 1} 筆資料`);
+      console.log(`建立分頁: ${sheetName}, 共 ${finalData.length - 1} 筆資料`);
     }
 
     // 11. 輸出檔案
@@ -450,22 +568,17 @@ function processExcelData(rawData) {
   // 1. 建立家長對應表，用於判斷手足關係
   const parentMap = buildParentMap(rawData);
 
-  // 2. 依年級分組，並收集所有處理過的學生資料
-  const gradeGroups = {};
+  // 2. 依小隊分組，並收集所有處理過的學生資料
+  const teamGroups = {};
   const allStudents = []; // 收集所有學生資料
 
   rawData.forEach((item, index) => {
-    // 取得年級，若為空則歸類到「未分類」
-    let grade = item['年級'] ? String(item['年級']).trim() : '未分類';
-    
-    // 將學齡前統一分組（未就學、小班、中班、大班）
-    if (grade.includes('未就學') || grade.includes('小班') || grade.includes('中班') || grade.includes('大班')) {
-      grade = '學齡前';
-    }
+    // 取得小隊，若為空則歸類到「未分隊」
+    const team = item['小隊'] ? String(item['小隊']).trim() : '未分隊';
 
-    // 初始化該年級的陣列
-    if (!gradeGroups[grade]) {
-      gradeGroups[grade] = [];
+    // 初始化該小隊的陣列
+    if (!teamGroups[team]) {
+      teamGroups[team] = [];
     }
 
     // 取得手足資訊
@@ -499,9 +612,6 @@ function processExcelData(rawData) {
         registrationNumber = registrationNumber.replace(/[^\d]/g, '');
       }
     }
-
-    // 取得小隊資訊
-    const team = item['小隊'] || '';
     
     // 取得手足的報名序號和小隊
     const siblingNumbers = siblings.registrationNumbers || [];
@@ -510,7 +620,7 @@ function processExcelData(rawData) {
     // 組裝該筆資料（支援多種欄位名稱）
     const processedItem = {
       原始項次: index + 1, // 使用資料的順序位置（從1開始）
-      項次: gradeGroups[grade].length + 1, // 年級內的項次
+      項次: teamGroups[team].length + 1, // 小隊內的項次
       所屬小隊: team,
       報名序號: registrationNumber,
       兒童姓名: item['兒童姓名'] || item['姓名'] || item['孩童姓名'] || '',
@@ -525,20 +635,34 @@ function processExcelData(rawData) {
       手足小隊: siblingTeams.join(', ') || '無',
       家長姓名: item['家長姓名'] || '',
       家長行動電話: phoneNumber,
+      公開照片: '',
+      提供聯繫方式: '',
       備註: item['備註'] || ''
     };
 
-    gradeGroups[grade].push(processedItem);
+    teamGroups[team].push(processedItem);
     allStudents.push(processedItem); // 加入到總表
   });
 
-  // 3. 對學齡前的資料進行排序
-  if (gradeGroups['學齡前']) {
-    gradeGroups['學齡前'].sort((a, b) => {
-      // 先按年級排序
+  // 3. 對每個小隊的資料按年級和報名序號排序
+  for (const [team, students] of Object.entries(teamGroups)) {
+    students.sort((a, b) => {
+      // 先按年級排序（學齡前分組）
       const gradeOrder = { '未就學': 0, '小班': 1, '中班': 2, '大班': 3 };
-      const gradeA = gradeOrder[a.年級] !== undefined ? gradeOrder[a.年級] : 999;
-      const gradeB = gradeOrder[b.年級] !== undefined ? gradeOrder[b.年級] : 999;
+      let gradeA, gradeB;
+      
+      // 處理學齡前
+      if (a.年級.includes('未就學') || a.年級.includes('小班') || a.年級.includes('中班') || a.年級.includes('大班')) {
+        gradeA = gradeOrder[a.年級] !== undefined ? gradeOrder[a.年級] : 0;
+      } else {
+        gradeA = gradeToNumber(a.年級);
+      }
+      
+      if (b.年級.includes('未就學') || b.年級.includes('小班') || b.年級.includes('中班') || b.年級.includes('大班')) {
+        gradeB = gradeOrder[b.年級] !== undefined ? gradeOrder[b.年級] : 0;
+      } else {
+        gradeB = gradeToNumber(b.年級);
+      }
       
       if (gradeA !== gradeB) {
         return gradeA - gradeB;
@@ -550,22 +674,11 @@ function processExcelData(rawData) {
       return numA - numB;
     });
   }
-  
-  // 其他年級按報名序號排序
-  for (const [grade, students] of Object.entries(gradeGroups)) {
-    if (grade !== '學齡前') {
-      students.sort((a, b) => {
-        const numA = parseInt(a.報名序號) || 0;
-        const numB = parseInt(b.報名序號) || 0;
-        return numA - numB;
-      });
-    }
-  }
 
-  // 4. 將每個年級的資料轉換為二維陣列格式（用於 Excel 輸出）
-  const gradeSheets = {};
+  // 4. 將每個小隊的資料轉換為二維陣列格式（用於 Excel 輸出）
+  const teamSheets = {};
 
-  for (const [grade, students] of Object.entries(gradeGroups)) {
+  for (const [team, students] of Object.entries(teamGroups)) {
     // 建立標題列
     const headers = [
       '出席',
@@ -584,6 +697,8 @@ function processExcelData(rawData) {
       '手足年級',
       '手足序號',
       '手足小隊',
+      '公開照片',
+      '提供聯繫方式',
       '備註'
     ];
 
@@ -635,6 +750,8 @@ function processExcelData(rawData) {
           '',  // 手足年級為空
           '',  // 手足序號為空
           '',  // 手足小隊為空
+          '',  // 公開照片為空
+          '',  // 提供聯繫方式為空
           student.備註
         ]);
         rowIndex++;
@@ -658,6 +775,8 @@ function processExcelData(rawData) {
             siblingGrades[idx] || '',   // 單一手足年級
             siblingNumbers[idx] || '',  // 單一手足序號
             siblingTeams[idx] || '',    // 單一手足小隊
+            '',  // 公開照片為空
+            '',  // 提供聯繫方式為空
             student.備註
           ]);
           rowIndex++;
@@ -666,8 +785,8 @@ function processExcelData(rawData) {
         // 如果有多個手足，需要合併基本資料欄位
         if (siblingNames.length > 1) {
           const endRow = rowIndex - 1;
-          // 合併欄位：出席(0), 項次(1), 所屬小隊(2), 報名序號(3), 兒童姓名(4), 性別(5), 年級(6), 學校(7), 家長姓名(8), 家長行動電話(9), 備註(16)
-          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16].forEach(col => {
+          // 合併欄位：出席(0), 項次(1), 所屬小隊(2), 報名序號(3), 兒童姓名(4), 性別(5), 年級(6), 學校(7), 家長姓名(8), 家長行動電話(9), 公開照片(16), 提供聯繫方式(17), 備註(18)
+          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 18].forEach(col => {
             merges.push({
               s: { r: startRow, c: col },  // start
               e: { r: endRow, c: col }     // end
@@ -680,10 +799,10 @@ function processExcelData(rawData) {
     });
 
     // 合併標題列和資料列
-    gradeSheets[grade] = { data: [headers, ...rows], merges };
+    teamSheets[team] = { data: [headers, ...rows], merges };
   }
 
-  return { gradeSheets, allStudents };
+  return { teamSheets, allStudents };
 }
 
 /**
@@ -732,6 +851,8 @@ function createSummarySheet(allStudents, sortBy = 'registrationNumber') {
     '手足年級',
     '手足序號',
     '手足小隊',
+    '公開照片',
+    '提供聯繫方式',
     '備註'
   ];
 
@@ -786,6 +907,8 @@ function createSummarySheet(allStudents, sortBy = 'registrationNumber') {
         '',  // 手足年級為空
         '',  // 手足序號為空
         '',  // 手足小隊為空
+        '',  // 公開照片為空
+        '',  // 提供聯繫方式為空
         student.備註
       ]);
       rowIndex++;
@@ -809,6 +932,8 @@ function createSummarySheet(allStudents, sortBy = 'registrationNumber') {
           siblingGrades[idx] || '',   // 單一手足年級
           siblingNumbers[idx] || '',  // 單一手足序號
           siblingTeams[idx] || '',    // 單一手足小隊
+          '',  // 公開照片為空
+          '',  // 提供聯繫方式為空
           student.備註
         ]);
         rowIndex++;
@@ -817,8 +942,8 @@ function createSummarySheet(allStudents, sortBy = 'registrationNumber') {
       // 如果有多個手足，需要合併基本資料欄位
       if (siblingNames.length > 1) {
         const endRow = rowIndex - 1;
-        // 合併欄位：出席(0), 項次(1), 所屬小隊(2), 報名序號(3), 兒童姓名(4), 性別(5), 年級(6), 學校(7), 家長姓名(8), 家長行動電話(9), 備註(16)
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16].forEach(col => {
+        // 合併欄位：出席(0), 項次(1), 所屬小隊(2), 報名序號(3), 兒童姓名(4), 性別(5), 年級(6), 學校(7), 家長姓名(8), 家長行動電話(9), 公開照片(16), 提供聯繫方式(17), 備註(18)
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 18].forEach(col => {
           merges.push({
             s: { r: startRow, c: col },  // start
             e: { r: endRow, c: col }     // end

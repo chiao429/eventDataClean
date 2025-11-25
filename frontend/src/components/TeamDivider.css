@@ -1,0 +1,37 @@
+.team-divider {
+  padding: 40px;
+}
+
+.section-title {
+  font-size: 1.5rem;
+  color: #3b82f6;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.section-description {
+  color: #ffffff;
+  margin-bottom: 30px;
+  font-size: 1rem;
+}
+
+.upload-area {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* 響應式設計 */
+@media (max-width: 768px) {
+  .team-divider {
+    padding: 20px;
+  }
+
+  .section-title {
+    font-size: 1.3rem;
+  }
+
+  .section-description {
+    font-size: 0.9rem;
+  }
+}

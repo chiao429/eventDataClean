@@ -1,5 +1,13 @@
 {
+  "name": "event-checkin-system",
+  "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "build": "cd frontend && npm install && npm run build",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install && cd ../api && npm install"
+  },
   "dependencies": {
     "xlsx": "^0.18.5"
   }

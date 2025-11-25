@@ -82,6 +82,136 @@ export async function uploadExcelFile(
 }
 
 /**
+ * 上傳分小隊 Excel 檔案並取得處理後的檔案
+ * @param file - 要上傳的檔案
+ * @param onProgress - 上傳進度回調函數
+ * @param filterOptions - 過濾選項
+ * @returns Promise<Blob> - 處理後的檔案 Blob
+ */
+export async function uploadTeamFile(
+  file: File,
+  onProgress?: (progress: number) => void,
+  filterOptions?: FilterOptions
+): Promise<Blob> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    if (filterOptions) {
+      formData.append('hideCancelled', String(filterOptions.hideCancelled || false));
+      formData.append('hideNoNumber', String(filterOptions.hideNoNumber || false));
+      formData.append('sortBy', filterOptions.sortBy || 'registrationNumber');
+    }
+
+    const response = await axios.post(`${API_BASE_URL}/api/team/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      responseType: 'blob',
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percentCompleted = Math.round(
+            (progressEvent.loaded * 100) / progressEvent.total
+          );
+          onProgress(percentCompleted);
+        }
+      },
+    });
+
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        if (error.response.data instanceof Blob) {
+          try {
+            const text = await error.response.data.text();
+            const errorData = JSON.parse(text);
+            throw new Error(`上傳失敗: ${error.response.status} - ${errorData.message || errorData.error || error.response.statusText}`);
+          } catch (parseError) {
+            throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+          }
+        } else {
+          throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+        }
+      } else if (error.request) {
+        throw new Error('無法連接到伺服器，請確認後端服務是否啟動');
+      } else {
+        throw new Error(`上傳失敗: ${error.message}`);
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * 上傳產生小隊名單 Excel 檔案並取得處理後的檔案
+ * @param file - 要上傳的檔案
+ * @param onProgress - 上傳進度回調函數
+ * @param filterOptions - 過濾選項
+ * @param teamInfo - 小隊資訊(活動名稱、小隊長資料)
+ * @returns Promise<Blob> - 處理後的檔案 Blob
+ */
+export async function uploadTeamListFile(
+  file: File,
+  onProgress?: (progress: number) => void,
+  filterOptions?: FilterOptions,
+  teamInfo?: any
+): Promise<Blob> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    if (filterOptions) {
+      formData.append('hideCancelled', String(filterOptions.hideCancelled || false));
+      formData.append('hideNoNumber', String(filterOptions.hideNoNumber || false));
+      formData.append('sortBy', filterOptions.sortBy || 'registrationNumber');
+    }
+    
+    if (teamInfo) {
+      formData.append('teamInfo', JSON.stringify(teamInfo));
+    }
+
+    const response = await axios.post(`${API_BASE_URL}/api/team/team-list`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      responseType: 'blob',
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percentCompleted = Math.round(
+            (progressEvent.loaded * 100) / progressEvent.total
+          );
+          onProgress(percentCompleted);
+        }
+      },
+    });
+
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        if (error.response.data instanceof Blob) {
+          try {
+            const text = await error.response.data.text();
+            const errorData = JSON.parse(text);
+            throw new Error(`上傳失敗: ${error.response.status} - ${errorData.message || errorData.error || error.response.statusText}`);
+          } catch (parseError) {
+            throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+          }
+        } else {
+          throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+        }
+      } else if (error.request) {
+        throw new Error('無法連接到伺服器，請確認後端服務是否啟動');
+      } else {
+        throw new Error(`上傳失敗: ${error.message}`);
+      }
+    }
+    throw error;
+  }
+}
+
+/**
  * 下載 Blob 檔案
  * @param blob - 要下載的 Blob
  * @param filename - 檔案名稱

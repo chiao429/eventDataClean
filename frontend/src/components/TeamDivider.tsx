@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { uploadExcelFile, downloadBlob } from '../api/uploadApi';
+import { uploadTeamFile, downloadBlob } from '../api/uploadApi';
 import './FileUpload.css';
 
 type UploadStatus = 'idle' | 'uploading' | 'processing' | 'success' | 'error';
 
-const FileUpload: React.FC = () => {
+const TeamDivider: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [progress, setProgress] = useState<number>(0);
@@ -26,7 +26,6 @@ const FileUpload: React.FC = () => {
    * 監聽排序方式變更，自動重新處理
    */
   useEffect(() => {
-    // 只有在已經處理成功的情況下才自動重新上傳
     if (selectedFile && status === 'success' && processedBlob) {
       handleUpload();
     }
@@ -41,7 +40,6 @@ const FileUpload: React.FC = () => {
     if (files && files.length > 0) {
       const file = files[0];
       
-      // 檢查檔案類型
       const validExtensions = ['.xlsx', '.xls'];
       const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
       
@@ -72,8 +70,7 @@ const FileUpload: React.FC = () => {
       setErrorMessage('');
       setProgress(0);
 
-      // 上傳檔案，並傳遞過濾選項和排序選項
-      const blob = await uploadExcelFile(selectedFile, (progress) => {
+      const blob = await uploadTeamFile(selectedFile, (progress) => {
         setProgress(progress);
       }, {
         hideCancelled,
@@ -110,7 +107,7 @@ const FileUpload: React.FC = () => {
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
         const day = String(now.getDate()).padStart(2, '0');
-        filename = `手足名單_${year}${month}${day}.xlsx`;
+        filename = `小隊分隊_${year}${month}${day}.xlsx`;
       }
       downloadBlob(processedBlob, filename);
     }
@@ -133,18 +130,18 @@ const FileUpload: React.FC = () => {
   return (
     <div className="file-upload">
       <div className="upload-area">
-        {/* 檔案選擇區 */}
-        <div className="file-input-wrapper">
+        {/* 檔案選擇 */}
+        <div className="file-upload-section">
           <input
             ref={fileInputRef}
             type="file"
             accept=".xlsx,.xls"
             onChange={handleFileChange}
             disabled={status === 'uploading' || status === 'processing'}
-            id="file-input"
+            id="team-file-input"
             className="file-input"
           />
-          <label htmlFor="file-input" className="file-input-label">
+          <label htmlFor="team-file-input" className="file-input-label">
             <span className="icon">📁</span>
             <span className="text">
               {selectedFile ? selectedFile.name : '選擇 Excel 檔案'}
@@ -159,6 +156,61 @@ const FileUpload: React.FC = () => {
             <p><strong>檔案大小:</strong> {(selectedFile.size / 1024).toFixed(2)} KB</p>
           </div>
         )}
+
+        {/* 排序選項 */}
+        <div className="sort-options">
+          <div className="sort-title">排序方式：</div>
+          <label className="radio-label">
+            <input
+              type="radio"
+              name="sortBy"
+              value="registrationNumber"
+              checked={sortBy === 'registrationNumber'}
+              onChange={(e) => setSortBy(e.target.value as 'registrationNumber' | 'originalIndex')}
+              disabled={status === 'uploading' || status === 'processing'}
+            />
+            <span>依報名序號排序</span>
+          </label>
+          <label className="radio-label">
+            <input
+              type="radio"
+              name="sortBy"
+              value="originalIndex"
+              checked={sortBy === 'originalIndex'}
+              onChange={(e) => setSortBy(e.target.value as 'registrationNumber' | 'originalIndex')}
+              disabled={status === 'uploading' || status === 'processing'}
+            />
+            <span>依原始項次排序</span>
+          </label>
+        </div>
+
+        {/* 過濾選項 */}
+        <div className="filter-options">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={hideCancelled}
+              onChange={(e) => setHideCancelled(e.target.checked)}
+              disabled={status === 'uploading' || status === 'processing'}
+            />
+            <span>不顯示取消名單</span>
+          </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={hideNoNumber}
+              onChange={(e) => setHideNoNumber(e.target.checked)}
+              disabled={status === 'uploading' || status === 'processing'}
+            />
+            <span>不顯示無序號名單</span>
+          </label>
+        </div>
+
+        {/* 處理提示 */}
+        <div className="info-message">
+          <span className="icon">ℹ️</span>
+          <span>學齡前（大班、中班、小班、未就學）將統一分組</span>
+        </div>
 
         {/* 進度條 */}
         {(status === 'uploading' || status === 'processing') && (
@@ -201,7 +253,7 @@ const FileUpload: React.FC = () => {
                 type="text"
                 value={customFilename}
                 onChange={(e) => setCustomFilename(e.target.value)}
-                placeholder="留空則使用預設檔名：手足名單_yyyymmdd"
+                placeholder="留空則使用預設檔名：小隊分隊_yyyymmdd"
                 style={{
                   width: '100%',
                   padding: '10px',
@@ -260,4 +312,4 @@ const FileUpload: React.FC = () => {
   );
 };
 
-export default FileUpload;
+export default TeamDivider;
