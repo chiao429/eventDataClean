@@ -32,6 +32,9 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: '後端服務運行中' });
 });
 
+// 這樣寫才對：優先讀取環境變數 PORT，沒有才用 8080
+const port = process.env.PORT || 8080;
+
 // 啟動伺服器
 app.listen(PORT, () => {
   console.log(`🚀 後端伺服器已啟動於 http://localhost:${PORT}`);
