@@ -1,18 +1,18 @@
-# 使用 Node.js 18
 FROM node:18-alpine
+
 WORKDIR /app
 
-# 複製 package 設定檔
+# 複製 package.json 和 package-lock.json（如果有）
 COPY package*.json ./
 
-# 安裝套件
-RUN npm install --production
+# 安裝生產環境依賴
+RUN npm install --only=production
 
-# 複製所有程式碼
+# 複製其餘程式碼
 COPY . .
 
-# 設定環境變數 Port (Cloud Run 預設 8080)
-ENV PORT=8080
+# Cloud Run 會自己設定 PORT 環境變數，不一定要寫死 8080
+# 你的 server.js 有：const PORT = process.env.PORT || 3001;
 
-# 啟動指令 (請確認您的入口檔案是 index.js 還是 app.js)
-CMD [ "node", "index.js" ]
+# 明確指定啟動指令
+CMD ["npm", "start"]
