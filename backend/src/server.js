@@ -10,6 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+// 優先使用環境變數 PORT（例如 Cloud Run 會設定），本機開發預設使用 3001
 const PORT = process.env.PORT || 3001;
 
 // 中介軟體設定
@@ -31,9 +32,6 @@ app.use('/api/team', teamRoutes);
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: '後端服務運行中' });
 });
-
-// 這樣寫才對：優先讀取環境變數 PORT，沒有才用 8080
-const port = process.env.PORT || 8080;
 
 // 啟動伺服器
 app.listen(PORT, () => {
