@@ -38,6 +38,11 @@ const upload = multer({
   }
 });
 
+// 測試端點：GET /api/team
+router.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'team API is ready' });
+});
+
 /**
  * POST /api/team/upload
  * 上傳並處理分小隊 Excel 檔案
