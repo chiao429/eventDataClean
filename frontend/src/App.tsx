@@ -2,6 +2,7 @@ import { useState } from 'react';
 import FileUpload from './components/FileUpload';
 import TeamDivider from './components/TeamDivider';
 import TeamList from './components/TeamList';
+import WorkerAttendance from './components/WorkerAttendance';
 import Menu from './components/Menu';
 import './App.css';
 
@@ -21,9 +22,10 @@ function App() {
         </header>
 
         <Menu activeTab={activeTab} onTabChange={setActiveTab} />
-        
+
         {activeTab === 'excel-processor' && <FileUpload />}
         {activeTab === 'team-divider' && <TeamDivider />}
+        {activeTab === 'worker-attendance' && <WorkerAttendance />}
         {activeTab === 'team-list' && <TeamList />}
 
         <footer className="footer">
@@ -76,6 +78,55 @@ function App() {
                   <span className="field-tag">家長姓名</span>
                   <span className="field-tag">家長行動電話</span>
                   <span className="field-tag">備註</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'worker-attendance' && (
+            <>
+              <div className="info-section" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <h3>📋 系統說明</h3>
+                  <ul>
+                    <li>上傳同工名單 Excel 檔案（.xlsx 或 .xls）</li>
+                    <li>系統會依欄位名稱讀取「姓名 / 性別 / 組別 / 聯絡電話 / 所屬小組」</li>
+                    <li>自動產生同工出席名單：包含序號、姓名、到達時間、已到、組別、聯絡電話、性別、所屬小組</li>
+                    <li>「到達時間」與「已到」欄位預設留空，方便現場手動填寫</li>
+                  </ul>
+                </div>
+                <div style={{ marginLeft: '20px' }}>
+                  <a
+                    href="/範本_同工名單.xlsx"
+                    download="範本_同工名單.xlsx"
+                    style={{
+                      display: 'inline-block',
+                      padding: '10px 20px',
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      color: '#ffffff',
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      border: 'none',
+                      borderRadius: '8px',
+                      textDecoration: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    📥 同工名單範例下載
+                  </a>
+                </div>
+              </div>
+
+              <div className="info-section">
+                <h3>📝 建議欄位名稱</h3>
+                <div className="fields-grid">
+                  <span className="field-tag">姓名 / 同工姓名</span>
+                  <span className="field-tag">性別</span>
+                  <span className="field-tag">組別 / 部門 / 服事組別</span>
+                  <span className="field-tag">聯絡電話 / 手機 / 電話 / 行動電話</span>
+                  <span className="field-tag">所屬小組 / 小組 / 所屬小隊</span>
                 </div>
               </div>
             </>

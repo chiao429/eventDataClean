@@ -82,6 +82,65 @@ export async function uploadExcelFile(
 }
 
 /**
+ * 上傳同工名單並取得同工出席名單 Excel 檔案
+ * @param file - 要上傳的同工名單檔案
+ * @param onProgress - 上傳進度回調函數
+ * @param outputFileName - 自訂輸出檔名（可選），若未提供則由後端使用預設檔名
+ */
+export async function uploadWorkerAttendanceFile(
+  file: File,
+  onProgress?: (progress: number) => void,
+  outputFileName?: string
+): Promise<Blob> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    if (outputFileName && outputFileName.trim()) {
+      formData.append('outputFileName', outputFileName.trim());
+    }
+
+    const response = await axios.post(`${API_BASE_URL}/api/team/worker-attendance`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      responseType: 'blob',
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percentCompleted = Math.round(
+            (progressEvent.loaded * 100) / progressEvent.total
+          );
+          onProgress(percentCompleted);
+        }
+      },
+    });
+
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        if (error.response.data instanceof Blob) {
+          try {
+            const text = await error.response.data.text();
+            const errorData = JSON.parse(text);
+            throw new Error(`上傳失敗: ${error.response.status} - ${errorData.message || errorData.error || error.response.statusText}`);
+          } catch (parseError) {
+            throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+          }
+        } else {
+          throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+        }
+      } else if (error.request) {
+        throw new Error('無法連接到伺服器，請確認後端服務是否啟動');
+      } else {
+        throw new Error(`上傳失敗: ${error.message}`);
+      }
+    }
+    throw error;
+  }
+}
+
+/**
  * 上傳分小隊 Excel 檔案並取得處理後的檔案
  * @param file - 要上傳的檔案
  * @param onProgress - 上傳進度回調函數

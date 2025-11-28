@@ -5,6 +5,7 @@ import fs from 'fs';
 import XLSX from 'xlsx-js-style';
 import { processTeamExcelFile } from '../services/teamDividerService.js';
 import { processExcelFile as processTeamListFile } from '../services/teamListService.js';
+import { processWorkerAttendanceFile } from '../services/workerAttendanceService.js';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,6 +36,63 @@ const upload = multer({
       return cb(new Error('只接受 .xlsx 或 .xls 格式的檔案'));
     }
     cb(null, true);
+  }
+});
+
+/**
+ * POST /api/team/worker-attendance
+ * 上傳同工名單並產生同工出席名單 Excel 檔案
+ */
+router.post('/worker-attendance', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: '請上傳檔案' });
+    }
+
+    const filePath = req.file.path;
+
+    console.log('處理同工出席名單檔案:', filePath);
+
+    const outputPath = await processWorkerAttendanceFile(filePath);
+
+    const fileBuffer = fs.readFileSync(outputPath);
+
+    const userFileName = (req.body && req.body.outputFileName ? String(req.body.outputFileName).trim() : '') || '';
+
+    let downloadName = userFileName;
+    if (!downloadName) {
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      downloadName = `同工出席名單_${yyyy}${mm}${dd}.xlsx`;
+    }
+
+    const encodedFilename = encodeURIComponent(downloadName);
+
+    // 清理暫存檔案
+    fs.unlinkSync(filePath);
+    fs.unlinkSync(outputPath);
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`);
+    res.send(fileBuffer);
+
+  } catch (error) {
+    console.error('處理同工出席名單檔案時發生錯誤:', error);
+
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {
+        console.error('清理上傳檔案失敗:', e);
+      }
+    }
+
+    return res.status(500).json({
+      error: '處理檔案時發生錯誤',
+      details: error.message
+    });
   }
 });
 
