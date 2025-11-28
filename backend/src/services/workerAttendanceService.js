@@ -16,7 +16,7 @@ function detectHeaderAndReadData(worksheet) {
 
     if (columns.some(col => col.includes('姓名'))) {
       rawData = testData;
-      console.log(`同工出席名單：找到標題列於第 ${skipRows + 1} 列`);
+      console.log(`同工出席名單：偵測到標題列於第 ${skipRows + 1} 列`);
       break;
     }
   }
