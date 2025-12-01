@@ -28,6 +28,7 @@ const TeamList: React.FC = () => {
   const [teamLeaders, setTeamLeaders] = useState<{[key: string]: {leader: string, leaderGender: string, viceLeader: string, viceLeaderGender: string}}>({});
   const [showTeamInfo, setShowTeamInfo] = useState<boolean>(false);
   const [submittedTeamInfo, setSubmittedTeamInfo] = useState<{activityName: string, leaders: {[key: string]: {leader: string, leaderGender: string, viceLeader: string, viceLeaderGender: string}}} | null>(null);
+  const [showSubmittedInfo, setShowSubmittedInfo] = useState<boolean>(false);
   const leaderFileInputRef = useRef<HTMLInputElement>(null);
 
   /**
@@ -155,14 +156,60 @@ const TeamList: React.FC = () => {
       // 讀取第一個工作表
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
-      const data = XLSX.utils.sheet_to_json(worksheet) as any[];
+      
+      // 嘗試從第 0 列到第 10 列，找到包含關鍵欄位的標題列
+      let data: any[] = [];
+      for (let skipRows = 0; skipRows <= 10; skipRows++) {
+        const testData = XLSX.utils.sheet_to_json(worksheet, { range: skipRows }) as any[];
+        if (!testData || testData.length === 0) continue;
+
+        const firstRow = testData[0];
+        const columns = Object.keys(firstRow);
+
+        // 關鍵欄位：隊名 / 姓名 / 性別 / 職務
+        const hasTeamCol = columns.some(col =>
+          col.includes('年級分布') ||
+          col.includes('年級分佈') ||
+          col.includes('小隊') ||
+          col.toLowerCase().includes('team') ||
+          col.includes('隊伍')
+        );
+        const hasNameCol = columns.some(col => col.includes('姓名') || col.toLowerCase().includes('name'));
+        const hasGenderCol = columns.some(col => col.includes('性別') || col.toLowerCase().includes('gender'));
+        const hasRoleCol = columns.some(col => col.includes('崗位') || col.includes('職務'));
+
+        if (hasTeamCol || hasNameCol || hasGenderCol || hasRoleCol) {
+          console.log(`小隊長資料：偵測到標題列於第 ${skipRows + 1} 列`, columns);
+          data = testData;
+          break;
+        }
+      }
+
+      // 若未偵測到明顯標題列，退回預設行為
+      if (!data || data.length === 0) {
+        console.warn('小隊長資料：未找到標準標題列，使用第一列作為標題');
+        data = XLSX.utils.sheet_to_json(worksheet) as any[];
+      }
 
       // 解析資料並填入小隊長資訊
       const newLeaders = { ...teamLeaders };
 
       data.forEach((row: any) => {
-        // 年級分布欄位即為小隊名稱
-        const team = row['年級分布'] || row['年級分佈'] || row['小隊'] || row['team'] || row['隊伍'];
+        // 年級分布欄位即為小隊名稱（例如 D007 或 D007小隊）
+        const rawTeam = row['年級分布'] || row['年級分佈'] || row['小隊'] || row['team'] || row['隊伍'];
+        let team = rawTeam;
+        if (team) {
+          const teamStr = String(team).trim();
+          // 如果是以「小隊」結尾，先去掉「小隊」兩個字再比對
+          const normalized = teamStr.replace(/小隊$/,'').trim();
+          if (newLeaders[teamStr]) {
+            team = teamStr;
+          } else if (newLeaders[normalized]) {
+            team = normalized;
+          } else {
+            team = teamStr; // 找不到就用原始字串，避免意外丟失
+          }
+        }
         const name = row['姓名'] || row['name'] || '';
         const gender = row['性別'] || row['gender'] || '';
         const role = row['崗位'] || row['職務'] || '';
@@ -205,6 +252,12 @@ const TeamList: React.FC = () => {
    * 提交小隊資訊並重新處理檔案
    */
   const handleSubmitTeamInfo = async () => {
+    // 活動名稱為必填
+    if (!activityName.trim()) {
+      alert('請輸入活動名稱');
+      return;
+    }
+
     // 先儲存小隊資訊
     const teamInfo = {
       activityName,
@@ -354,7 +407,7 @@ const TeamList: React.FC = () => {
             
             {/* 檔名輸入欄位 */}
             <div className="file-info">
-              <label htmlFor="filename-input" style={{ display: 'block', marginBottom: '8px', fontWeight: '600' }}>
+              <label htmlFor="filename-input" style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#ffffff' }}>
                 自訂檔名（可選）：
               </label>
               <input
@@ -384,34 +437,123 @@ const TeamList: React.FC = () => {
                 borderRadius: '8px',
                 border: '1px solid rgba(59, 130, 246, 0.3)'
               }}>
-                <h3 style={{ marginBottom: '15px', color: '#3b82f6' }}>小隊資訊設定</h3>
+                <h3 style={{ marginBottom: '15px', color: '#3b82f6' }}>資訊設定（必填）</h3>
                 
                 {/* 活動名稱 */}
                 <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600' }}>
-                    活動名稱：
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: '600', color: '#ffffff' }}>
+                    活動名稱（顯示於小隊名單最上方）：
                   </label>
-                  <input
-                    type="text"
-                    value={activityName}
-                    onChange={(e) => setActivityName(e.target.value)}
-                    placeholder="請輸入活動名稱"
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={activityName}
+                      onChange={(e) => setActivityName(e.target.value)}
+                      placeholder="請輸入活動名稱"
+                      style={{
+                        flex: 1,
+                        padding: '10px',
+                        fontSize: '1rem',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        borderRadius: '6px',
+                        background: 'rgba(15, 23, 42, 0.5)',
+                        color: '#ffffff'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setActivityName('')}
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(148, 163, 184, 0.6)',
+                        background: 'rgba(15, 23, 42, 0.8)',
+                        color: '#e5e7eb',
+                        cursor: 'pointer',
+                        fontSize: '0.8rem',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      清除
+                    </button>
+                  </div>
+                  {/* 活動名稱快捷選項 */}
+                  <div
                     style={{
-                      width: '100%',
-                      padding: '10px',
-                      fontSize: '1rem',
-                      border: '1px solid rgba(59, 130, 246, 0.3)',
-                      borderRadius: '6px',
-                      background: 'rgba(15, 23, 42, 0.5)',
-                      color: '#ffffff'
+                      marginTop: '8px',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '6px',
+                      fontSize: '0.85rem'
                     }}
-                  />
+                  >
+                    {/* 年份（自動抓當前年份數字，每次點擊都加到最前面） */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const year = new Date().getFullYear().toString();
+                        setActivityName(prev => `${year}${prev || ''}`);
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '999px',
+                        border: '1px solid rgba(148, 163, 184, 0.6)',
+                        background: 'rgba(15, 23, 42, 0.8)',
+                        color: '#e5e7eb',
+                        cursor: 'pointer',
+                        fontSize: '0.8rem',
+                        lineHeight: 1.4
+                      }}
+                    >
+                      {new Date().getFullYear()}
+                    </button>
+
+                    {/* 兒童聖誕午會 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivityName(prev => `${prev || ''}兒童聖誕午會`);
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '999px',
+                        border: '1px solid rgba(148, 163, 184, 0.6)',
+                        background: 'rgba(15, 23, 42, 0.8)',
+                        color: '#e5e7eb',
+                        cursor: 'pointer',
+                        fontSize: '0.8rem',
+                        lineHeight: 1.4
+                      }}
+                    >
+                      兒童聖誕午會
+                    </button>
+
+                    {/* 夢想探索號 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivityName(prev => `${prev || ''}夢想探索號`);
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '999px',
+                        border: '1px solid rgba(148, 163, 184, 0.6)',
+                        background: 'rgba(15, 23, 42, 0.8)',
+                        color: '#e5e7eb',
+                        cursor: 'pointer',
+                        fontSize: '0.8rem',
+                        lineHeight: 1.4
+                      }}
+                    >
+                      夢想探索號
+                    </button>
+                  </div>
                 </div>
 
                 {/* 小隊長資料 */}
                 <div style={{ marginBottom: '15px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <label style={{ fontWeight: '600' }}>
+                    <label style={{ fontWeight: '600', color: '#ffffff' }}>
                       小隊長資料：
                     </label>
                     <div>
@@ -423,7 +565,13 @@ const TeamList: React.FC = () => {
                         style={{ display: 'none' }}
                       />
                       <button
-                        onClick={() => leaderFileInputRef.current?.click()}
+                        onClick={() => {
+                          if (!activityName.trim()) {
+                            alert('請先在「資訊設定（必填）」中輸入活動名稱');
+                            return;
+                          }
+                          leaderFileInputRef.current?.click();
+                        }}
                         style={{
                           padding: '8px 16px',
                           fontSize: '0.9rem',
@@ -547,42 +695,63 @@ const TeamList: React.FC = () => {
               </div>
             )}
 
-            {/* 顯示已提交的小隊資訊 */}
+            {/* 顯示已提交的小隊資訊（改為按鈕展開） */}
             {submittedTeamInfo && (
-              <div style={{ 
-                marginTop: '20px', 
-                padding: '20px', 
-                background: 'rgba(34, 197, 94, 0.1)', 
-                borderRadius: '8px',
-                border: '1px solid rgba(34, 197, 94, 0.3)'
-              }}>
-                <h3 style={{ marginBottom: '15px', color: '#22c55e' }}>✓ 已提交的小隊資訊</h3>
-                
-                <div style={{ marginBottom: '15px' }}>
-                  <strong>活動名稱：</strong>
-                  <span style={{ marginLeft: '10px' }}>{submittedTeamInfo.activityName || '(未填寫)'}</span>
-                </div>
+              <div style={{ marginTop: '20px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowSubmittedInfo(prev => !prev)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(34, 197, 94, 0.6)',
+                    background: 'rgba(15, 23, 42, 0.8)',
+                    color: '#bbf7d0',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    fontWeight: 600
+                  }}
+                >
+                  {showSubmittedInfo ? '隱藏已提交的小隊資訊' : '顯示已提交的小隊資訊'}
+                </button>
 
-                <div>
-                  <strong>小隊長資料：</strong>
-                  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {Object.entries(submittedTeamInfo.leaders).map(([team, leaders]) => (
-                      <div key={team} style={{ paddingLeft: '10px' }}>
-                        <span style={{ color: '#3b82f6', fontWeight: '600' }}>{team}:</span>
-                        <span style={{ marginLeft: '10px' }}>
-                          小隊長: {leaders.leader || '(未填寫)'}
-                          {leaders.leaderGender && <span style={{ color: '#94a3b8' }}> ({leaders.leaderGender})</span>}
-                        </span>
-                        {team.toUpperCase().startsWith('D') && (
-                          <span style={{ marginLeft: '15px' }}>
-                            副小隊長: {leaders.viceLeader || '(未填寫)'}
-                            {leaders.viceLeaderGender && <span style={{ color: '#94a3b8' }}> ({leaders.viceLeaderGender})</span>}
-                          </span>
-                        )}
+                {showSubmittedInfo && (
+                  <div style={{ 
+                    marginTop: '12px', 
+                    padding: '20px', 
+                    background: 'rgba(34, 197, 94, 0.1)', 
+                    borderRadius: '8px',
+                    border: '1px solid rgba(34, 197, 94, 0.3)'
+                  }}>
+                    <h3 style={{ marginBottom: '15px', color: '#22c55e' }}>✓ 已提交的小隊資訊</h3>
+                    
+                    <div style={{ marginBottom: '15px' }}>
+                      <strong>活動名稱：</strong>
+                      <span style={{ marginLeft: '10px' }}>{submittedTeamInfo.activityName || '(未填寫)'}</span>
+                    </div>
+
+                    <div>
+                      <strong>小隊長資料：</strong>
+                      <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {Object.entries(submittedTeamInfo.leaders).map(([team, leaders]) => (
+                          <div key={team} style={{ paddingLeft: '10px' }}>
+                            <span style={{ color: '#3b82f6', fontWeight: '600' }}>{team}:</span>
+                            <span style={{ marginLeft: '10px' }}>
+                              小隊長: {leaders.leader || '(未填寫)'}
+                              {leaders.leaderGender && <span style={{ color: '#94a3b8' }}> ({leaders.leaderGender})</span>}
+                            </span>
+                            {team.toUpperCase().startsWith('D') && (
+                              <span style={{ marginLeft: '15px' }}>
+                                副小隊長: {leaders.viceLeader || '(未填寫)'}
+                                {leaders.viceLeaderGender && <span style={{ color: '#94a3b8' }}> ({leaders.viceLeaderGender})</span>}
+                              </span>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </>

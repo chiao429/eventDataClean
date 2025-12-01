@@ -46,13 +46,29 @@ function buildAttendanceRows(cleanedData) {
     throw new Error('Excel 檔案中沒有資料，請確認檔案內容');
   }
 
-  const firstRow = cleanedData[0];
-  const availableColumns = Object.keys(firstRow);
+  const normalizeHeader = (key) =>
+    String(key)
+      .replace(/[\r\n\s\u3000]+/g, '')
+      .trim();
+
+  const columnMap = new Map();
+  cleanedData.forEach(row => {
+    Object.keys(row).forEach(key => {
+      const norm = normalizeHeader(key);
+      if (!columnMap.has(norm)) {
+        columnMap.set(norm, key);
+      }
+    });
+  });
+
+  const availableColumns = Array.from(columnMap.keys());
   console.log('同工出席名單：可用欄位', availableColumns);
 
   const findCol = (...candidates) => {
     for (const name of candidates) {
-      if (availableColumns.includes(name)) return name;
+      if (columnMap.has(name)) {
+        return columnMap.get(name);
+      }
     }
     return null;
   };
