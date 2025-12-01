@@ -156,27 +156,38 @@ const TeamList: React.FC = () => {
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
       const data = XLSX.utils.sheet_to_json(worksheet) as any[];
-      
+
       // 解析資料並填入小隊長資訊
       const newLeaders = { ...teamLeaders };
-      
+
       data.forEach((row: any) => {
-        const team = row['小隊'] || row['team'] || row['隊伍'];
-        const leader = row['小隊長'] || row['leader'] || row['隊長'];
-        const leaderGender = row['小隊長性別'] || row['leaderGender'] || row['隊長性別'] || '';
-        const viceLeader = row['副小隊長'] || row['viceLeader'] || row['副隊長'] || '';
-        const viceLeaderGender = row['副小隊長性別'] || row['viceLeaderGender'] || row['副隊長性別'] || '';
-        
-        if (team && newLeaders[team]) {
+        // 年級分布欄位即為小隊名稱
+        const team = row['年級分布'] || row['年級分佈'] || row['小隊'] || row['team'] || row['隊伍'];
+        const name = row['姓名'] || row['name'] || '';
+        const gender = row['性別'] || row['gender'] || '';
+        const role = row['崗位'] || row['職務'] || '';
+
+        if (!team || !newLeaders[team]) {
+          return;
+        }
+
+        // 根據崗位判斷是小隊長或副小隊長
+        const roleText = String(role).trim();
+        if (roleText.includes('副小隊長')) {
           newLeaders[team] = {
-            leader: leader || '',
-            leaderGender: leaderGender || '',
-            viceLeader: viceLeader || '',
-            viceLeaderGender: viceLeaderGender || ''
+            ...newLeaders[team],
+            viceLeader: name || newLeaders[team].viceLeader || '',
+            viceLeaderGender: gender || newLeaders[team].viceLeaderGender || ''
+          };
+        } else if (roleText.includes('小隊長')) {
+          newLeaders[team] = {
+            ...newLeaders[team],
+            leader: name || newLeaders[team].leader || '',
+            leaderGender: gender || newLeaders[team].leaderGender || ''
           };
         }
       });
-      
+
       setTeamLeaders(newLeaders);
       alert('小隊長資料已成功匯入！');
     } catch (error) {

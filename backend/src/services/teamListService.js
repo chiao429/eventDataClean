@@ -439,7 +439,7 @@ export async function processExcelFile(inputPath, filterOptions = {}, teamInfo =
           }
           if (leaderInfo.viceLeader) {
             const viceLeaderTitle = leaderInfo.viceLeaderGender === '男' ? '哥哥' : leaderInfo.viceLeaderGender === '女' ? '姊姊' : '';
-            teamInfoText += ` 副小隊長：${leaderInfo.viceLeader}${viceLeaderTitle}`;
+            teamInfoText += ` / 副小隊長：${leaderInfo.viceLeader}${viceLeaderTitle}`;
           }
         }
         
