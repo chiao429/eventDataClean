@@ -277,9 +277,10 @@ function parseSiblingString(siblingStr) {
  * @param {boolean} filterOptions.hideNoNumber - 是否隱藏無序號名單
  * @param {string} filterOptions.sortBy - 排序方式 ('registrationNumber' | 'originalIndex')
  * @param {Object} teamInfo - 小隊資訊(活動名稱、小隊長資料)
+ * @param {string|null} consentFilePath - 授權資料 Excel 檔路徑（可選）
  * @returns {Promise<string>} - 輸出檔案路徑
  */
-export async function processExcelFile(inputPath, filterOptions = {}, teamInfo = null) {
+export async function processExcelFile(inputPath, filterOptions = {}, teamInfo = null, consentFilePath = null) {
   try {
     // 1. 讀取 Excel 檔案
     const workbook = XLSX.readFile(inputPath);
@@ -361,7 +362,92 @@ export async function processExcelFile(inputPath, filterOptions = {}, teamInfo =
       console.warn('特別提醒：「小隊」欄位是必要的，用於填入所屬小隊和手足小隊資訊');
     }
 
-    // 6.5. 根據過濾選項過濾資料
+    // 6.5. 若有授權檔案，先讀取並建立同意欄位對應表
+    let consentMap = null;
+    if (consentFilePath) {
+      try {
+        const consentWb = XLSX.readFile(consentFilePath);
+        const consentFirstSheet = consentWb.SheetNames[0];
+        const consentSheet = consentWb.Sheets[consentFirstSheet];
+
+        // 直接讀成 JSON，並清理欄位名稱
+        const consentRaw = XLSX.utils.sheet_to_json(consentSheet);
+        const consentCleaned = consentRaw.map(row => {
+          const cleanedRow = {};
+          for (const [key, value] of Object.entries(row)) {
+            const cleanKey = String(key).replace(/[\r\n]+/g, '').trim();
+            cleanedRow[cleanKey] = value;
+          }
+          return cleanedRow;
+        });
+
+        consentMap = new Map();
+
+        // 依欄位名稱關鍵字自動偵測照片同意與聯絡同意欄位
+        let photoConsentKey = null;
+        let contactConsentKey = null;
+        if (consentCleaned.length > 0) {
+          const sample = consentCleaned[0];
+          const columns = Object.keys(sample);
+
+          // 照片/影片同意：欄名包含「照片」或「影片」即可
+          photoConsentKey = columns.find(col =>
+            col.includes('照片') || col.includes('影片')
+          ) || null;
+
+          // 聯絡方式/通知同意：欄名同時包含「聯絡」或「聯繫」，以及「通知」或「活動」
+          contactConsentKey = columns.find(col =>
+            (col.includes('聯絡') || col.includes('聯繫')) &&
+            (col.includes('通知') || col.includes('活動'))
+          ) || null;
+
+          console.log('授權資料欄位偵測:', {
+            columns,
+            photoConsentKey,
+            contactConsentKey
+          });
+        }
+
+        consentCleaned.forEach(row => {
+          const childName = String(row['兒童姓名'] || row['姓名'] || '').trim();
+          const parentName = String(row['家長姓名'] || '').trim();
+          let phone = row['家長行動電話'] || row['聯絡電話'] || '';
+
+          if (!childName) return;
+
+          phone = String(phone || '').trim();
+          if (phone && /^9\d{8}$/.test(phone)) {
+            phone = '0' + phone;
+          }
+
+          // 優先使用「兒童姓名 + 家長姓名」，若家長姓名為空且有電話，改用「兒童姓名 + 電話」
+          const key = parentName
+            ? `${childName}|${parentName}`
+            : (phone ? `${childName}|${phone}` : null);
+
+          if (!key) return;
+
+          const rawPhoto = photoConsentKey ? row[photoConsentKey] : '';
+          const rawContact = contactConsentKey ? row[contactConsentKey] : '';
+          const school = String(row['就讀學校'] || row['學校'] || '').trim();
+          const grade = String(row['年級'] || '').trim();
+
+          consentMap.set(key, {
+            childName,
+            school,
+            grade,
+            photoConsent: String(rawPhoto || '').trim(),
+            contactConsent: String(rawContact || '').trim()
+          });
+        });
+
+        console.log(`授權資料：讀取到 ${consentMap.size} 筆同意紀錄`);
+      } catch (e) {
+        console.error('讀取授權資料檔案失敗:', e);
+      }
+    }
+
+    // 7. 根據過濾選項過濾資料
     let filteredData = cleanedData;
     
     if (filterOptions.hideCancelled) {
@@ -381,19 +467,19 @@ export async function processExcelFile(inputPath, filterOptions = {}, teamInfo =
       console.log(`過濾「無序號名單」後剩餘 ${filteredData.length} 筆資料`);
     }
 
-    // 7. 處理資料：依小隊分組並加入手足資訊
-    const { teamSheets, allStudents } = processExcelData(filteredData);
+    // 8. 處理資料：依小隊分組並加入手足資訊與授權欄位
+    const { teamSheets, allStudents } = processExcelData(filteredData, consentMap);
 
-    // 8. 建立新的工作簿
+    // 9. 建立新的工作簿
     const newWorkbook = XLSX.utils.book_new();
-
-    // 9. 建立「總表」分頁（放在第一個）
+    
+    // 10. 建立「總表」分頁（放在第一個）
     const { sheet: summarySheet, data: summaryData } = createSummarySheet(allStudents, filterOptions.sortBy);
     applySheetStyles(summarySheet, summaryData);
     XLSX.utils.book_append_sheet(newWorkbook, summarySheet, '總表');
     console.log(`建立分頁: 總表, 共 ${allStudents.length} 筆資料`);
 
-    // 10. 建立各小隊分頁（按小隊名稱自然排序）
+    // 11. 建立各小隊分頁（按小隊名稱自然排序）
     const teamNames = Object.keys(teamSheets).sort((a, b) => {
       // 自然排序：先比較字母部分，再比較數字部分
       const matchA = a.match(/^([a-zA-Z]+)(\d+)$/);
@@ -539,7 +625,7 @@ export async function processExcelFile(inputPath, filterOptions = {}, teamInfo =
       console.log(`建立分頁: ${sheetName}, 共 ${finalData.length - 1} 筆資料`);
     }
 
-    // 11. 輸出檔案
+    // 12. 輸出檔案
     const outputPath = path.join(__dirname, '../../uploads', `processed-${Date.now()}.xlsx`);
     XLSX.writeFile(newWorkbook, outputPath);
 
@@ -564,7 +650,7 @@ export async function processExcelFile(inputPath, filterOptions = {}, teamInfo =
  * @param {Array} rawData - 原始資料陣列
  * @returns {Object} - 包含年級分組資料和所有學生資料
  */
-function processExcelData(rawData) {
+function processExcelData(rawData, consentMap) {
   // 1. 建立家長對應表，用於判斷手足關係
   const parentMap = buildParentMap(rawData);
 
@@ -617,6 +703,50 @@ function processExcelData(rawData) {
     const siblingNumbers = siblings.registrationNumbers || [];
     const siblingTeams = siblings.teams || [];
 
+    // 依姓名＋家長姓名（若家長姓名空白則改用姓名＋家長行動電話）尋找授權紀錄
+    let photoConsent = '';
+    let contactConsent = '';
+    if (consentMap) {
+      const childNameForKey = String(item['兒童姓名'] || item['姓名'] || item['孩童姓名'] || '').trim();
+      const parentNameForKey = String(item['家長姓名'] || '').trim();
+      if (childNameForKey) {
+        const key = parentNameForKey
+          ? `${childNameForKey}|${parentNameForKey}`
+          : (phoneNumber ? `${childNameForKey}|${phoneNumber}` : null);
+
+        let consent = null;
+
+        // 第一層：用 key 直接比對
+        if (key) {
+          consent = consentMap.get(key) || null;
+        }
+
+        // 第二層：若 key 找不到，改用「兒童姓名 + 學校 + 年級」比對
+        if (!consent) {
+          const mainSchool = String(item['學校'] || '').trim();
+          const mainGrade = String(item['年級'] || '').trim();
+
+          if (mainSchool && mainGrade) {
+            for (const value of consentMap.values()) {
+              if (
+                value.childName === childNameForKey &&
+                value.school === mainSchool &&
+                value.grade === mainGrade
+              ) {
+                consent = value;
+                break;
+              }
+            }
+          }
+        }
+
+        if (consent) {
+          photoConsent = consent.photoConsent || '';
+          contactConsent = consent.contactConsent || '';
+        }
+      }
+    }
+
     // 組裝該筆資料（支援多種欄位名稱）
     const processedItem = {
       原始項次: index + 1, // 使用資料的順序位置（從1開始）
@@ -635,8 +765,8 @@ function processExcelData(rawData) {
       手足小隊: siblingTeams.join(', ') || '無',
       家長姓名: item['家長姓名'] || '',
       家長行動電話: phoneNumber,
-      公開照片: '',
-      提供聯繫方式: '',
+      公開照片: photoConsent,
+      提供聯繫方式: contactConsent,
       備註: item['備註'] || ''
     };
 
@@ -750,8 +880,8 @@ function processExcelData(rawData) {
           '',  // 手足年級為空
           '',  // 手足序號為空
           '',  // 手足小隊為空
-          '',  // 公開照片為空
-          '',  // 提供聯繫方式為空
+          student.公開照片 || '',
+          student.提供聯繫方式 || '',
           student.備註
         ]);
         rowIndex++;
@@ -775,8 +905,8 @@ function processExcelData(rawData) {
             siblingGrades[idx] || '',   // 單一手足年級
             siblingNumbers[idx] || '',  // 單一手足序號
             siblingTeams[idx] || '',    // 單一手足小隊
-            '',  // 公開照片為空
-            '',  // 提供聯繫方式為空
+            student.公開照片 || '',
+            student.提供聯繫方式 || '',
             student.備註
           ]);
           rowIndex++;
@@ -907,8 +1037,8 @@ function createSummarySheet(allStudents, sortBy = 'registrationNumber') {
         '',  // 手足年級為空
         '',  // 手足序號為空
         '',  // 手足小隊為空
-        '',  // 公開照片為空
-        '',  // 提供聯繫方式為空
+        student.公開照片 || '',
+        student.提供聯繫方式 || '',
         student.備註
       ]);
       rowIndex++;
@@ -932,8 +1062,8 @@ function createSummarySheet(allStudents, sortBy = 'registrationNumber') {
           siblingGrades[idx] || '',   // 單一手足年級
           siblingNumbers[idx] || '',  // 單一手足序號
           siblingTeams[idx] || '',    // 單一手足小隊
-          '',  // 公開照片為空
-          '',  // 提供聯繫方式為空
+          student.公開照片 || '',
+          student.提供聯繫方式 || '',
           student.備註
         ]);
         rowIndex++;

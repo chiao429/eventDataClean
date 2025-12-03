@@ -149,7 +149,11 @@ router.post('/upload', upload.single('file'), (req, res) => {
     
     // 清理上傳的檔案
     if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {
+        console.error('清理上傳檔案失敗:', e);
+      }
     }
     
     res.status(500).json({ 
@@ -163,13 +167,23 @@ router.post('/upload', upload.single('file'), (req, res) => {
  * POST /api/team/team-list
  * 上傳並處理產生小隊名單 Excel 檔案
  */
-router.post('/team-list', upload.single('file'), async (req, res) => {
+router.post('/team-list', upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'consentFile', maxCount: 1 }
+]), async (req, res) => {
   try {
-    if (!req.file) {
+    const uploadedFiles = req.files || {};
+    const mainFiles = uploadedFiles.file || [];
+    const consentFiles = uploadedFiles.consentFile || [];
+
+    const mainFile = mainFiles[0];
+    const consentFile = consentFiles[0];
+
+    if (!mainFile) {
       return res.status(400).json({ error: '請上傳檔案' });
     }
 
-    const filePath = req.file.path;
+    const filePath = mainFile.path;
     
     // 取得過濾和排序選項
     const options = {
@@ -193,16 +207,18 @@ router.post('/team-list', upload.single('file'), async (req, res) => {
     console.log('小隊資訊:', teamInfo);
 
     // 處理 Excel 檔案
-    const outputPath = await processTeamListFile(filePath, options, teamInfo);
+    const consentFilePath = consentFile ? consentFile.path : null;
+    const outputPath = await processTeamListFile(filePath, options, teamInfo, consentFilePath);
 
     // 讀取檔案並回傳
     const fileBuffer = fs.readFileSync(outputPath);
     
     // 清理暫存檔案
     fs.unlinkSync(filePath);
+    if (consentFilePath && fs.existsSync(consentFilePath)) {
+      fs.unlinkSync(consentFilePath);
+    }
     fs.unlinkSync(outputPath);
-    
-    console.log('已清理暫存檔案');
 
     // 設定回應標頭並傳送檔案
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -213,8 +229,26 @@ router.post('/team-list', upload.single('file'), async (req, res) => {
     console.error('處理產生小隊名單檔案時發生錯誤:', error);
     
     // 清理上傳的檔案
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    const uploadedFiles = req.files || {};
+    const mainFiles = uploadedFiles.file || [];
+    const consentFiles = uploadedFiles.consentFile || [];
+
+    const mainFile = mainFiles[0];
+    const consentFile = consentFiles[0];
+
+    if (mainFile && fs.existsSync(mainFile.path)) {
+      try {
+        fs.unlinkSync(mainFile.path);
+      } catch (e) {
+        console.error('清理上傳檔案失敗:', e);
+      }
+    }
+    if (consentFile && fs.existsSync(consentFile.path)) {
+      try {
+        fs.unlinkSync(consentFile.path);
+      } catch (e) {
+        console.error('清理授權檔案失敗:', e);
+      }
     }
     
     res.status(500).json({ 

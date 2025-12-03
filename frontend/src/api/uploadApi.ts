@@ -204,17 +204,19 @@ export async function uploadTeamFile(
 
 /**
  * 上傳產生小隊名單 Excel 檔案並取得處理後的檔案
- * @param file - 要上傳的檔案
+ * @param file - 要上傳的報名資料檔案
  * @param onProgress - 上傳進度回調函數
  * @param filterOptions - 過濾選項
  * @param teamInfo - 小隊資訊(活動名稱、小隊長資料)
+ * @param consentFile - 授權/同意書 Excel 檔（可選）
  * @returns Promise<Blob> - 處理後的檔案 Blob
  */
 export async function uploadTeamListFile(
   file: File,
   onProgress?: (progress: number) => void,
   filterOptions?: FilterOptions,
-  teamInfo?: any
+  teamInfo?: any,
+  consentFile?: File | null
 ): Promise<Blob> {
   try {
     const formData = new FormData();
@@ -228,6 +230,10 @@ export async function uploadTeamListFile(
     
     if (teamInfo) {
       formData.append('teamInfo', JSON.stringify(teamInfo));
+    }
+
+    if (consentFile) {
+      formData.append('consentFile', consentFile);
     }
 
     const response = await axios.post(`${API_BASE_URL}/api/team/team-list`, formData, {

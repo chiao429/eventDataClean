@@ -6,11 +6,13 @@ type UploadStatus = 'idle' | 'uploading' | 'processing' | 'success' | 'error';
 
 const TeamList: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [consentFile, setConsentFile] = useState<File | null>(null);
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [progress, setProgress] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [processedBlob, setProcessedBlob] = useState<Blob | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const consentFileInputRef = useRef<HTMLInputElement>(null);
   
   // 過濾選項
   const [hideCancelled] = useState<boolean>(true);
@@ -68,6 +70,28 @@ const TeamList: React.FC = () => {
   };
 
   /**
+   * 處理授權資料檔案選擇
+   */
+  const handleConsentFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+
+      const validExtensions = ['.xlsx', '.xls'];
+      const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+
+      if (!validExtensions.includes(fileExtension)) {
+        setErrorMessage('授權名單請選擇 .xlsx 或 .xls 格式的檔案');
+        setConsentFile(null);
+        return;
+      }
+
+      setConsentFile(file);
+      setErrorMessage('');
+    }
+  };
+
+  /**
    * 處理檔案上傳
    */
   const handleUpload = async () => {
@@ -81,14 +105,14 @@ const TeamList: React.FC = () => {
       setErrorMessage('');
       setProgress(0);
 
-      // 上傳檔案，並傳遞過濾選項、排序選項和小隊資訊
+      // 上傳檔案，並傳遞過濾選項、排序選項、小隊資訊與授權名單
       const blob = await uploadTeamListFile(selectedFile, (progress) => {
         setProgress(progress);
       }, {
         hideCancelled,
         hideNoNumber,
         sortBy
-      }, submittedTeamInfo);
+      }, submittedTeamInfo, consentFile);
 
       setStatus('success');
       setProcessedBlob(blob);
@@ -277,7 +301,7 @@ const TeamList: React.FC = () => {
           hideCancelled,
           hideNoNumber,
           sortBy
-        }, teamInfo);
+        }, teamInfo, consentFile);
         
         setStatus('success');
         setProcessedBlob(blob);
@@ -335,12 +359,16 @@ const TeamList: React.FC = () => {
    */
   const handleReset = () => {
     setSelectedFile(null);
+    setConsentFile(null);
     setStatus('idle');
     setProgress(0);
     setErrorMessage('');
     setProcessedBlob(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+    if (consentFileInputRef.current) {
+      consentFileInputRef.current.value = '';
     }
   };
 
@@ -362,6 +390,25 @@ const TeamList: React.FC = () => {
             <span className="icon">📁</span>
             <span className="text">
               {selectedFile ? selectedFile.name : '選擇 Excel 檔案'}
+            </span>
+          </label>
+        </div>
+
+        {/* 授權名單上傳區 */}
+        <div className="file-input-wrapper" style={{ marginTop: '12px' }}>
+          <input
+            ref={consentFileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleConsentFileChange}
+            disabled={status === 'uploading' || status === 'processing'}
+            id="consent-file-input"
+            className="file-input"
+          />
+          <label htmlFor="consent-file-input" className="file-input-label" style={{ opacity: status === 'uploading' || status === 'processing' ? 0.7 : 1 }}>
+            <span className="icon">📄</span>
+            <span className="text">
+              {consentFile ? `授權名單：${consentFile.name}` : '（可選）上傳授權/同意書 Excel'}
             </span>
           </label>
         </div>
