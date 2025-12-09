@@ -82,6 +82,53 @@ export async function uploadExcelFile(
 }
 
 /**
+ * 上傳總表檔與多個小隊分頁檔，回寫出席欄並取得更新後的總表
+ * @param summaryFile - 總表 Excel 檔案（summary）
+ * @param files - 小隊分頁檔案陣列（files）
+ * @returns Promise<Blob> - 回寫後的總表 Blob
+ */
+export async function uploadPreCampWriteback(summaryFile: File, files: File[]): Promise<Blob> {
+  try {
+    const formData = new FormData();
+
+    formData.append('summary', summaryFile);
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const response = await axios.post(`${API_BASE_URL}/api/team/pre-camp-writeback`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      responseType: 'blob',
+    });
+
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        if (error.response.data instanceof Blob) {
+          try {
+            const text = await error.response.data.text();
+            const errorData = JSON.parse(text);
+            throw new Error(`上傳失敗: ${error.response.status} - ${errorData.message || errorData.error || error.response.statusText}`);
+          } catch (parseError) {
+            throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+          }
+        } else {
+          throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+        }
+      } else if (error.request) {
+        throw new Error('無法連接到伺服器，請確認後端服務是否啟動');
+      } else {
+        throw new Error(`上傳失敗: ${error.message}`);
+      }
+    }
+    throw error;
+  }
+}
+
+/**
  * 上傳同工名單並取得同工出席名單 Excel 檔案
  * @param file - 要上傳的同工名單檔案
  * @param onProgress - 上傳進度回調函數
@@ -297,4 +344,49 @@ export function downloadBlob(blob: Blob, filename: string): void {
   // 清理
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
+}
+
+/**
+ * 上傳多個已產生之小隊名單 Excel 檔案，取得合併後的行前通知總表
+ * @param files - 要上傳的小隊名單檔案陣列（每個為 .xlsx/.xls）
+ * @returns Promise<Blob> - 合併後的行前通知總表 Blob
+ */
+export async function uploadPreCampNotifyFiles(files: File[]): Promise<Blob> {
+  try {
+    const formData = new FormData();
+
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const response = await axios.post(`${API_BASE_URL}/api/team/pre-camp-notify`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      responseType: 'blob',
+    });
+
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        if (error.response.data instanceof Blob) {
+          try {
+            const text = await error.response.data.text();
+            const errorData = JSON.parse(text);
+            throw new Error(`上傳失敗: ${error.response.status} - ${errorData.message || errorData.error || error.response.statusText}`);
+          } catch (parseError) {
+            throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+          }
+        } else {
+          throw new Error(`上傳失敗: ${error.response.status} - ${error.response.statusText}`);
+        }
+      } else if (error.request) {
+        throw new Error('無法連接到伺服器，請確認後端服務是否啟動');
+      } else {
+        throw new Error(`上傳失敗: ${error.message}`);
+      }
+    }
+    throw error;
+  }
 }

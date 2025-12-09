@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import XLSX from 'xlsx-js-style';
 import { processTeamExcelFile } from '../services/teamDividerService.js';
-import { processExcelFile as processTeamListFile } from '../services/teamListService.js';
+import { processExcelFile as processTeamListFile, processPreCampNotifyFiles, processPreCampWriteback } from '../services/teamListService.js';
 import { processWorkerAttendanceFile } from '../services/workerAttendanceService.js';
 import { fileURLToPath } from 'url';
 
@@ -36,6 +36,170 @@ const upload = multer({
       return cb(new Error('只接受 .xlsx 或 .xls 格式的檔案'));
     }
     cb(null, true);
+  }
+});
+
+/**
+ * POST /api/team/pre-camp-writeback
+ * 上傳小隊分頁檔（含出席欄）與一個總表檔，將出席資料回寫到總表
+ */
+router.post('/pre-camp-writeback', upload.fields([
+  { name: 'summary', maxCount: 1 },
+  { name: 'files', maxCount: 50 }
+]), async (req, res) => {
+  try {
+    const uploadedFiles = req.files || {};
+    const summaryFiles = uploadedFiles.summary || [];
+    const teamFiles = uploadedFiles.files || [];
+
+    const summaryFile = summaryFiles[0];
+
+    if (!summaryFile) {
+      return res.status(400).json({ error: '請上傳總表檔案（summary）' });
+    }
+    if (!teamFiles || teamFiles.length === 0) {
+      return res.status(400).json({ error: '請至少上傳一個小隊分頁檔案（files）' });
+    }
+
+    const summaryPath = summaryFile.path;
+    const teamPaths = teamFiles.map(file => file.path).filter(Boolean);
+
+    console.log('行前通知總表回寫 - 總表檔案:', summaryPath);
+    console.log('行前通知總表回寫 - 小隊檔案:', teamPaths);
+
+    const outputPath = await processPreCampWriteback(summaryPath, teamPaths);
+
+    const fileBuffer = fs.readFileSync(outputPath);
+
+    // 清理暫存檔案
+    if (summaryFile && summaryFile.path && fs.existsSync(summaryFile.path)) {
+      try {
+        fs.unlinkSync(summaryFile.path);
+      } catch (e) {
+        console.error('清理總表上傳檔案失敗:', e);
+      }
+    }
+    for (const file of teamFiles) {
+      if (file && file.path && fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (e) {
+          console.error('清理小隊上傳檔案失敗:', e);
+        }
+      }
+    }
+    if (fs.existsSync(outputPath)) {
+      try {
+        fs.unlinkSync(outputPath);
+      } catch (e) {
+        console.error('清理輸出檔案失敗:', e);
+      }
+    }
+
+    const downloadName = '總表_含出席.xlsx';
+    const encodedFilename = encodeURIComponent(downloadName);
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`);
+    res.send(fileBuffer);
+
+  } catch (error) {
+    console.error('處理行前通知總表回寫時發生錯誤:', error);
+
+    const uploadedFiles = req.files || {};
+    const summaryFiles = uploadedFiles.summary || [];
+    const teamFiles = uploadedFiles.files || [];
+
+    const summaryFile = summaryFiles[0];
+
+    if (summaryFile && summaryFile.path && fs.existsSync(summaryFile.path)) {
+      try {
+        fs.unlinkSync(summaryFile.path);
+      } catch (e) {
+        console.error('清理總表上傳檔案失敗:', e);
+      }
+    }
+    for (const file of teamFiles) {
+      if (file && file.path && fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (e) {
+          console.error('清理小隊上傳檔案失敗:', e);
+        }
+      }
+    }
+
+    return res.status(500).json({
+      error: '處理檔案時發生錯誤',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/team/pre-camp-notify
+ * 上傳多個已產生之小隊名單檔案，合併為行前通知總表
+ */
+router.post('/pre-camp-notify', upload.array('files', 50), async (req, res) => {
+  try {
+    const files = req.files || [];
+
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: '請上傳至少一個檔案' });
+    }
+
+    const inputPaths = files.map(file => file.path).filter(Boolean);
+
+    console.log('處理行前通知名單檔案:', inputPaths);
+
+    const outputPath = await processPreCampNotifyFiles(inputPaths);
+
+    const fileBuffer = fs.readFileSync(outputPath);
+
+    // 清理暫存檔案
+    for (const file of files) {
+      if (file && file.path && fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (e) {
+          console.error('清理上傳檔案失敗:', e);
+        }
+      }
+    }
+
+    if (fs.existsSync(outputPath)) {
+      try {
+        fs.unlinkSync(outputPath);
+      } catch (e) {
+        console.error('清理輸出檔案失敗:', e);
+      }
+    }
+
+    const downloadName = '行前通知名單.xlsx';
+    const encodedFilename = encodeURIComponent(downloadName);
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`);
+    res.send(fileBuffer);
+
+  } catch (error) {
+    console.error('處理行前通知名單檔案時發生錯誤:', error);
+
+    const files = req.files || [];
+    for (const file of files) {
+      if (file && file.path && fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (e) {
+          console.error('清理上傳檔案失敗:', e);
+        }
+      }
+    }
+
+    return res.status(500).json({
+      error: '處理檔案時發生錯誤',
+      details: error.message
+    });
   }
 });
 

@@ -1,6 +1,7 @@
 import XLSX from 'xlsx-js-style';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import AdmZip from 'adm-zip';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -169,6 +170,506 @@ function applySheetStyles(ws, data) {
         }
       }
     }
+  }
+}
+
+/**
+ * 行前通知名單：合併多個已產生之小隊名單檔案
+ * @param {string[]} inputPaths - 輸入檔案路徑陣列（每個為已產生之小隊名單 Excel）
+ * @returns {Promise<string>} - 輸出檔案路徑
+ */
+export async function processPreCampNotifyFiles(inputPaths = []) {
+  try {
+    if (!Array.isArray(inputPaths) || inputPaths.length === 0) {
+      throw new Error('沒有可處理的檔案');
+    }
+
+    let headers = null;
+    const allRows = [];
+
+    for (const inputPath of inputPaths) {
+      if (!inputPath) continue;
+
+      const workbook = XLSX.readFile(inputPath);
+
+      // 逐一讀取所有工作表（排除「總表」）
+      for (const sheetName of workbook.SheetNames) {
+        if (!sheetName || sheetName === '總表') continue;
+
+        const worksheet = workbook.Sheets[sheetName];
+        if (!worksheet) continue;
+
+        const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        if (!sheetData || sheetData.length === 0) continue;
+
+        const [sheetHeaders, ...rows] = sheetData;
+        if (!sheetHeaders || sheetHeaders.length === 0) continue;
+
+        // 第一次以此檔的標題列為主，其後若標題不完全相同，仍以第一個為準
+        if (!headers) {
+          headers = sheetHeaders;
+        }
+
+        // 將非空白列加入總表
+        for (const row of rows) {
+          if (!row) continue;
+
+          const hasValue = row.some(cell => {
+            if (cell === null || cell === undefined) return false;
+            return String(cell).trim() !== '';
+          });
+
+          if (!hasValue) continue;
+
+          // 若某列欄位數少於標題數，補空字串；多出欄位則截斷
+          const normalizedRow = [...row];
+          if (headers) {
+            if (normalizedRow.length < headers.length) {
+              while (normalizedRow.length < headers.length) {
+                normalizedRow.push('');
+              }
+            } else if (normalizedRow.length > headers.length) {
+              normalizedRow.length = headers.length;
+            }
+          }
+
+          allRows.push(normalizedRow);
+        }
+      }
+    }
+
+    if (!headers) {
+      throw new Error('所有檔案中皆未讀到有效資料');
+    }
+
+    // 建立新的工作簿與「行前通知總表」分頁
+    const finalData = [headers, ...allRows];
+    const newWorkbook = XLSX.utils.book_new();
+    const summarySheet = XLSX.utils.aoa_to_sheet(finalData);
+
+    // 套用與小隊名單相同的樣式（含「出席」欄寬等）
+    applySheetStyles(summarySheet, finalData);
+
+    XLSX.utils.book_append_sheet(newWorkbook, summarySheet, '行前通知總表');
+
+    const outputPath = path.join(__dirname, '../../uploads', `pre-camp-notify-${Date.now()}.xlsx`);
+    XLSX.writeFile(newWorkbook, outputPath);
+
+    console.log(`行前通知名單處理完成，輸出檔案: ${outputPath}`);
+    return outputPath;
+
+  } catch (error) {
+    console.error('處理行前通知名單時發生錯誤:', error);
+    console.error('錯誤詳情:', error.message);
+    console.error('錯誤堆疊:', error.stack);
+    throw error;
+  }
+}
+
+/**
+ * 行前通知名單：從多個小隊分頁檔收集出席欄，回寫到一個總表檔案
+ * @param {string} summaryPath - 總表 Excel 檔路徑（欄位與小隊名單匯出一致）
+ * @param {string[]} teamPaths - 小隊分頁檔路徑陣列
+ * @returns {Promise<string>} - 輸出檔案路徑
+ */
+export async function processPreCampWriteback(summaryPath, teamPaths = []) {
+  try {
+    if (!summaryPath) {
+      throw new Error('未提供總表檔案路徑');
+    }
+    if (!Array.isArray(teamPaths) || teamPaths.length === 0) {
+      throw new Error('未提供任何小隊分頁檔案');
+    }
+
+    // 1. 從所有小隊分頁檔案收集「報名序號 -> 出席」對應表
+    const attendanceMap = new Map();
+
+    const normalizeHeader = (value) => {
+      if (value === null || value === undefined) return '';
+      return String(value).replace(/[\r\n]+/g, '').trim();
+    };
+
+    for (const inputPath of teamPaths) {
+      if (!inputPath) continue;
+
+      const workbook = XLSX.readFile(inputPath);
+
+      for (const sheetName of workbook.SheetNames) {
+        if (!sheetName) continue;
+
+        const worksheet = workbook.Sheets[sheetName];
+        if (!worksheet) continue;
+
+        const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        if (!data || data.length === 0) continue;
+
+        let headerRowIndex = -1;
+        let headers = null;
+
+        const maxHeaderScan = Math.min(20, data.length - 1);
+        for (let r = 0; r <= maxHeaderScan; r++) {
+          const row = data[r];
+          if (!row) continue;
+
+          const normalizedRow = row.map(normalizeHeader);
+          const hasReg = normalizedRow.some(h => h.includes('報名') && (h.includes('序') || h.includes('號')));
+          const hasAttend = normalizedRow.some(h => h.includes('出席'));
+
+          if (hasReg || hasAttend) {
+            headerRowIndex = r;
+            headers = normalizedRow;
+            console.log(`行前回寫：檔案 ${inputPath}，工作表 ${sheetName}，偵測到標題列於第 ${r + 1} 列：`, headers);
+            break;
+          }
+        }
+
+        if (headerRowIndex === -1 || !headers) {
+          console.warn(`工作表 ${sheetName} 未找到包含「報名序號」或「出席」的標題列，略過此分頁`);
+          continue;
+        }
+
+        const regIndex = headers.findIndex(h => h.includes('報名') && (h.includes('序') || h.includes('號')));
+        let attendIndex = headers.findIndex(h => h.includes('出席'));
+
+        if (regIndex === -1) {
+          console.warn(`工作表 ${sheetName} 標題列中找不到「報名序號」欄位，略過此分頁`);
+          continue;
+        }
+
+        if (attendIndex === -1) {
+          console.log(`工作表 ${sheetName} 標題列中找不到「出席」欄位名稱，預設使用第 1 欄 (A 欄) 作為出席欄`);
+          attendIndex = 0;
+        }
+
+        for (let i = headerRowIndex + 1; i < data.length; i++) {
+          const row = data[i];
+          if (!row) continue;
+
+          const reg = row[regIndex];
+          const regStr = reg === null || reg === undefined ? '' : String(reg).trim();
+          if (!regStr) continue;
+
+          const attend = row[attendIndex];
+          const attendValue = attend === null || attend === undefined ? '' : String(attend).trim();
+
+          if (attendValue) {
+            attendanceMap.set(regStr, attendValue);
+          }
+        }
+      }
+    }
+
+    console.log(`從小隊分頁檔案收集到 ${attendanceMap.size} 筆出席資料`);
+
+    if (attendanceMap.size === 0) {
+      throw new Error('未從任何小隊分頁檔案中讀到出席資料，請確認檔案內容是否已填寫出席欄位');
+    }
+
+    // 2. 用 xlsx-js-style 讀取總表，只為了找到標題列位置和報名序號/出席欄位索引
+    const tempWb = XLSX.readFile(summaryPath);
+    const summarySheetName = tempWb.SheetNames.includes('總表') ? '總表' : tempWb.SheetNames[0];
+    const tempWs = tempWb.Sheets[summarySheetName];
+    const summaryData = XLSX.utils.sheet_to_json(tempWs, { header: 1 });
+
+    let summaryHeaderRowIndex = -1;
+    let summaryHeaders = null;
+
+    for (let r = 0; r < Math.min(20, summaryData.length); r++) {
+      const row = summaryData[r];
+      if (!row) continue;
+
+      const normalizedRow = row.map(normalizeHeader);
+      const hasReg = normalizedRow.some(h => h.includes('報名') && (h.includes('序') || h.includes('號')));
+      const hasAttend = normalizedRow.some(h => h.includes('出席'));
+
+      if (hasReg || hasAttend) {
+        summaryHeaderRowIndex = r;
+        summaryHeaders = normalizedRow;
+        console.log(`行前回寫：總表偵測到標題列於第 ${r + 1} 列`);
+        break;
+      }
+    }
+
+    if (summaryHeaderRowIndex === -1 || !summaryHeaders) {
+      throw new Error('總表中找不到包含「報名序號」或「出席」的標題列');
+    }
+
+    const regIndex = summaryHeaders.findIndex(h => h.includes('報名') && (h.includes('序') || h.includes('號')));
+    const attendIndex = summaryHeaders.findIndex(h => h.includes('出席'));
+
+    if (regIndex === -1 || attendIndex === -1) {
+      throw new Error('總表中找不到「報名序號」或「出席」欄位');
+    }
+
+    // 3. 用 ZIP 方式直接修改 Excel XML，使用字串替換而非解析重建
+    console.log('使用 ZIP/XML 方式直接修改 Excel 檔案...');
+    const zip = new AdmZip(summaryPath);
+    const sheetXmlPath = 'xl/worksheets/sheet1.xml'; // 總表通常是 sheet1
+    const sheetXmlEntry = zip.getEntry(sheetXmlPath);
+    
+    if (!sheetXmlEntry) {
+      throw new Error('無法找到總表的 XML 檔案');
+    }
+
+    let sheetXmlContent = sheetXmlEntry.getData().toString('utf8');
+
+    // 建立需要更新的儲存格對應表
+    const cellUpdates = new Map();
+    for (let i = summaryHeaderRowIndex + 1; i < summaryData.length; i++) {
+      const row = summaryData[i];
+      if (!row) continue;
+
+      const reg = row[regIndex];
+      const regStr = reg === null || reg === undefined ? '' : String(reg).trim();
+      if (!regStr || !attendanceMap.has(regStr)) continue;
+
+      const attendValue = attendanceMap.get(regStr);
+      const rowIndex = i + 1; // Excel 從 1 開始
+      const colLetter = String.fromCharCode(65 + attendIndex); // A, B, C...
+      const cellRef = `${colLetter}${rowIndex}`;
+      
+      cellUpdates.set(cellRef, attendValue);
+    }
+
+    console.log(`需要更新 ${cellUpdates.size} 個儲存格`);
+
+    // 用字串替換的方式更新每個儲存格的值
+    for (const [cellRef, newValue] of cellUpdates) {
+      // 轉義 XML 特殊字元
+      const escapedValue = newValue
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+
+      // 尋找該儲存格的 XML 標籤，使用更精確的模式
+      // 格式：<c r="A4" ...>...</c>
+      const cellPattern = new RegExp(
+        `<c\\s+r="${cellRef}"[^>]*>.*?</c>`,
+        's'
+      );
+      
+      const match = sheetXmlContent.match(cellPattern);
+      if (match && match[0]) {
+        const oldCell = match[0];
+        let newCell = oldCell;
+        
+        // 檢查是否有 <t> 標籤（文字內容）
+        if (oldCell.includes('<t>')) {
+          // 替換 <t> 標籤內的內容
+          newCell = oldCell.replace(
+            /<t[^>]*>.*?<\/t>/s,
+            `<t>${escapedValue}</t>`
+          );
+        } else if (oldCell.includes('<v>')) {
+          // 替換 <v> 標籤內的內容
+          newCell = oldCell.replace(
+            /<v>.*?<\/v>/s,
+            `<v>${escapedValue}</v>`
+          );
+        } else {
+          // 儲存格存在但沒有值，改用 inlineStr 類型插入
+          // 移除可能存在的 t 屬性，加入新的 t="inlineStr" 和內容
+          newCell = oldCell
+            .replace(/\s+t="[^"]*"/, '') // 移除舊的 t 屬性
+            .replace(/<c\s+r="[^"]*"/, `$& t="inlineStr"`) // 加入 t="inlineStr"
+            .replace('</c>', `<is><t>${escapedValue}</t></is></c>`); // 加入內容
+        }
+        
+        sheetXmlContent = sheetXmlContent.replace(oldCell, newCell);
+        console.log(`已更新儲存格 ${cellRef}: ${newValue}`);
+      } else {
+        console.warn(`找不到儲存格 ${cellRef}，略過`);
+      }
+    }
+
+    // 更新 ZIP 中的總表 XML
+    zip.updateFile(sheetXmlPath, Buffer.from(sheetXmlContent, 'utf8'));
+
+    // 4. 處理各小隊分頁：只更新值為「取消」的儲存格
+    console.log('開始處理各小隊分頁的「取消」資料...');
+    
+    // 先找出總表中「所屬小隊」欄位的索引
+    const teamColIndex = summaryHeaders.findIndex(h => h.includes('所屬') && h.includes('小隊'));
+    
+    if (teamColIndex !== -1) {
+      // 收集需要在小隊分頁中更新的「取消」記錄
+      const cancelRecordsByTeam = new Map(); // teamName -> [{ reg, attendValue }]
+      
+      for (let i = summaryHeaderRowIndex + 1; i < summaryData.length; i++) {
+        const row = summaryData[i];
+        if (!row) continue;
+
+        const reg = row[regIndex];
+        const regStr = reg === null || reg === undefined ? '' : String(reg).trim();
+        if (!regStr || !attendanceMap.has(regStr)) continue;
+
+        const attendValue = attendanceMap.get(regStr);
+        
+        // 只處理包含「取消」的值
+        if (attendValue && String(attendValue).includes('取消')) {
+          const teamName = String(row[teamColIndex] || '').trim();
+          if (teamName) {
+            if (!cancelRecordsByTeam.has(teamName)) {
+              cancelRecordsByTeam.set(teamName, []);
+            }
+            cancelRecordsByTeam.get(teamName).push({ reg: regStr, attendValue });
+          }
+        }
+      }
+
+      console.log(`找到 ${cancelRecordsByTeam.size} 個小隊需要更新「取消」資料`);
+
+      // 處理每個小隊分頁
+      for (const [teamName, records] of cancelRecordsByTeam) {
+        console.log(`處理小隊分頁 ${teamName}，共 ${records.length} 筆取消記錄`);
+        
+        // 找到對應的 sheet XML（假設分頁順序與 SheetNames 一致）
+        const sheetIndex = tempWb.SheetNames.indexOf(teamName);
+        if (sheetIndex === -1) {
+          console.warn(`找不到小隊分頁 ${teamName}，略過`);
+          continue;
+        }
+
+        const teamSheetXmlPath = `xl/worksheets/sheet${sheetIndex + 1}.xml`;
+        const teamSheetEntry = zip.getEntry(teamSheetXmlPath);
+        
+        if (!teamSheetEntry) {
+          console.warn(`找不到小隊分頁 ${teamName} 的 XML 檔案 ${teamSheetXmlPath}，略過`);
+          continue;
+        }
+
+        let teamSheetXml = teamSheetEntry.getData().toString('utf8');
+
+        // 讀取該小隊分頁的資料，找到標題列和報名序號欄位
+        const teamWs = tempWb.Sheets[teamName];
+        const teamData = XLSX.utils.sheet_to_json(teamWs, { header: 1 });
+
+        let teamHeaderRowIndex = -1;
+        let teamHeaders = null;
+
+        for (let r = 0; r < Math.min(20, teamData.length); r++) {
+          const row = teamData[r];
+          if (!row) continue;
+
+          const normalizedRow = row.map(normalizeHeader);
+          const hasReg = normalizedRow.some(h => h.includes('報名') && (h.includes('序') || h.includes('號')));
+
+          if (hasReg) {
+            teamHeaderRowIndex = r;
+            teamHeaders = normalizedRow;
+            break;
+          }
+        }
+
+        if (teamHeaderRowIndex === -1 || !teamHeaders) {
+          console.warn(`小隊分頁 ${teamName} 找不到標題列，略過`);
+          continue;
+        }
+
+        const teamRegIndex = teamHeaders.findIndex(h => h.includes('報名') && (h.includes('序') || h.includes('號')));
+        let teamAttendIndex = teamHeaders.findIndex(h => h.includes('出席'));
+
+        if (teamRegIndex === -1) {
+          console.warn(`小隊分頁 ${teamName} 找不到「報名序號」欄位，略過`);
+          continue;
+        }
+
+        if (teamAttendIndex === -1) {
+          console.log(`小隊分頁 ${teamName} 找不到「出席」欄位，預設使用第 1 欄 (A 欄)`);
+          teamAttendIndex = 0;
+        }
+
+        // 對每筆取消記錄，找到對應的列並更新
+        for (const { reg, attendValue } of records) {
+          // 在 teamData 中找到對應的列
+          let targetRowIndex = -1;
+          for (let i = teamHeaderRowIndex + 1; i < teamData.length; i++) {
+            const row = teamData[i];
+            if (!row) continue;
+
+            const cellReg = row[teamRegIndex];
+            const cellRegStr = cellReg === null || cellReg === undefined ? '' : String(cellReg).trim();
+            
+            if (cellRegStr === reg) {
+              targetRowIndex = i;
+              break;
+            }
+          }
+
+          if (targetRowIndex === -1) {
+            console.warn(`小隊分頁 ${teamName} 找不到報名序號 ${reg}，略過`);
+            continue;
+          }
+
+          // 計算儲存格位置
+          const rowIndex = targetRowIndex + 1; // Excel 從 1 開始
+          const colLetter = String.fromCharCode(65 + teamAttendIndex);
+          const cellRef = `${colLetter}${rowIndex}`;
+
+          // 轉義 XML 特殊字元
+          const escapedValue = attendValue
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+
+          // 用字串替換更新儲存格
+          const cellPattern = new RegExp(
+            `<c\\s+r="${cellRef}"[^>]*>.*?</c>`,
+            's'
+          );
+          
+          const match = teamSheetXml.match(cellPattern);
+          if (match && match[0]) {
+            const oldCell = match[0];
+            let newCell = oldCell;
+            
+            if (oldCell.includes('<t>')) {
+              newCell = oldCell.replace(
+                /<t[^>]*>.*?<\/t>/s,
+                `<t>${escapedValue}</t>`
+              );
+            } else if (oldCell.includes('<v>')) {
+              newCell = oldCell.replace(
+                /<v>.*?<\/v>/s,
+                `<v>${escapedValue}</v>`
+              );
+            } else {
+              newCell = oldCell
+                .replace(/\s+t="[^"]*"/, '')
+                .replace(/<c\s+r="[^"]*"/, `$& t="inlineStr"`)
+                .replace('</c>', `<is><t>${escapedValue}</t></is></c>`);
+            }
+            
+            teamSheetXml = teamSheetXml.replace(oldCell, newCell);
+            console.log(`小隊分頁 ${teamName} 已更新儲存格 ${cellRef}: ${attendValue}`);
+          } else {
+            console.warn(`小隊分頁 ${teamName} 找不到儲存格 ${cellRef}，略過`);
+          }
+        }
+
+        // 更新該小隊分頁的 XML
+        zip.updateFile(teamSheetXmlPath, Buffer.from(teamSheetXml, 'utf8'));
+      }
+    } else {
+      console.log('總表中找不到「所屬小隊」欄位，略過小隊分頁更新');
+    }
+
+    // 5. 輸出新檔案
+    const outputPath = path.join(__dirname, '../../uploads', `summary-with-attendance-${Date.now()}.xlsx`);
+    zip.writeZip(outputPath);
+
+    console.log(`總表回寫完成（包含小隊分頁的取消資料），輸出檔案: ${outputPath}`);
+    return outputPath;
+
+  } catch (error) {
+    console.error('行前通知總表回寫時發生錯誤:', error);
+    console.error('錯誤詳情:', error.message);
+    console.error('錯誤堆疊:', error.stack);
+    throw error;
   }
 }
 

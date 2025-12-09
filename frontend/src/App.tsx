@@ -3,6 +3,7 @@ import FileUpload from './components/FileUpload';
 import TeamDivider from './components/TeamDivider';
 import TeamList from './components/TeamList';
 import WorkerAttendance from './components/WorkerAttendance';
+import PreCampNotify from './components/PreCampNotify';
 import Menu from './components/Menu';
 import './App.css';
 
@@ -27,6 +28,7 @@ function App() {
         {activeTab === 'team-divider' && <TeamDivider />}
         {activeTab === 'worker-attendance' && <WorkerAttendance />}
         {activeTab === 'team-list' && <TeamList />}
+        {activeTab === 'pre-camp-notify' && <PreCampNotify />}
 
         <footer className="footer">
           {activeTab === 'team-divider' && (

@@ -10,7 +10,8 @@ const Menu: React.FC<MenuProps> = ({ activeTab, onTabChange }) => {
   const menuItems = [
     { id: 'team-divider', label: '小隊分隊', icon: '👥' },
     { id: 'worker-attendance', label: '同工出席名單', icon: '🙋' },
-    { id: 'team-list', label: '小隊名單', icon: '📝' }
+    { id: 'team-list', label: '小隊名單', icon: '📝' },
+    { id: 'pre-camp-notify', label: '彙整行前通知名單', icon: '📨' }
   ];
 
   return (
