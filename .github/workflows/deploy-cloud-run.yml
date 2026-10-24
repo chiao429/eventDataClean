@@ -15,6 +15,7 @@ env:
   REGION: ${{ vars.GCP_REGION }}
   SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
   REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}/${{ vars.CLOUD_RUN_SERVICE }}
 
 jobs:
   verify:
@@ -49,26 +50,36 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Build and push container
-        run: |
-          gcloud builds submit . \
-            --project="$PROJECT_ID" \
-            --tag="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${GITHUB_SHA}"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
 
       - name: Deploy Cloud Run service
         run: |
           gcloud run deploy "$SERVICE" \
             --project="$PROJECT_ID" \
             --region="$REGION" \
-            --image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${GITHUB_SHA}" \
+            --image="${IMAGE}:${GITHUB_SHA}" \
             --platform=managed \
             --allow-unauthenticated \
             --quiet
