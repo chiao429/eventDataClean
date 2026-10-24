@@ -20,6 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // 確保 uploads 目錄存在
 const uploadsDir = path.join(__dirname, '../uploads');
+const frontendDistDir = path.join(__dirname, '../../frontend-dist');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -32,6 +33,17 @@ app.use('/api/team', teamRoutes);
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: '後端服務運行中' });
 });
+
+// 單一 Cloud Run 容器同時提供 React 前端與 API
+if (fs.existsSync(frontendDistDir)) {
+  app.use(express.static(frontendDistDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    return res.sendFile(path.join(frontendDistDir, 'index.html'));
+  });
+}
 
 // 啟動伺服器
 app.listen(PORT, () => {
